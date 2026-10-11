@@ -66,3 +66,6 @@ scratch.*
 cookie_jar.db*
 scratch-data/*
 !dabooks/README.md
+
+# --- Jupyter auto-recovery saves (dabooks is the tracked work dir) ---
+.ipynb_checkpoints/

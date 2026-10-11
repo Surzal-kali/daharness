@@ -16,8 +16,8 @@
 #
 # JupyterLab (the tool nursery) shares the live framework tree and reaches the
 # gateway on the workbench subnet; with the cage gone it can also be proxied
-# for remote access. Still localhost-only at the port level (127.0.0.1:8888)
-# and JUPYTER_TOKEN-gated.
+# for remote access. JUPYTER_TOKEN-gated and bound to the host's
+# JupyterLab port on all interfaces (operator choice, reaches the lab lanes).
 #
 # Open WebUI is the open chat frontend: it does its own web search and calls
 # the framework's API routes for tool/code execution.
@@ -133,7 +133,7 @@ services:
       context: ..
       dockerfile: dockered/jupyter.Dockerfile
     ports:
-      - "8888:8888"
+      - "8888:8888" # published on all host interfaces (operator choice — reaches the lab lanes)
     networks:
       workbench:
         ipv4_address: 172.28.0.40
@@ -144,8 +144,10 @@ services:
       # routes via the workbench interface for framework traffic.
       egress:
     volumes:
-      - jupyter-workspace:/home/jovyan/work
       - /home/kali/github/stuff:/home/jovyan/framework
+      - /home/kali/github/stuff/dabooks:/home/jovyan/work       # notebooks — on host, git init here for version control
+      - /home/kali/jupyter-home/.ipython:/home/jovyan/.ipython   # IPython history survives recreates
+
       # Persist notebook-intelligence settings + the stored GitHub token so
       # image rebuilds don't wipe the Copilot login. Contains credentials —
       # gitignored as dockered/jupyter-nbi/.
@@ -170,7 +172,6 @@ services:
 
 volumes:
   open-webui-data:
-  jupyter-workspace:
 
 
 networks:
