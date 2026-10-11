@@ -13,6 +13,7 @@ bug-bounty submission draft and lab documentation, all from the same data.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -29,6 +30,15 @@ class FindingStore:
 
     def __init__(self, db_path: str = _DEFAULT_DB):
         self.db_path = db_path
+        # Root guard (mirrors utils/scratch_store.py + utils/cookie_jar.py):
+        # chown the DB + WAL + SHM files back to the workspace owner BEFORE
+        # opening the connection.  A prior root run (bootstrap/IPython for
+        # masscan/packetcraft) leaves these root-owned; WAL mode needs write
+        # access to all three files, and a non-root process that can't write
+        # the WAL/SHM sidecars gets "database is locked" instead of a clean
+        # permission error.  ids.db is shared with utils/sessions.py and
+        # auxiliaries/framework_status.py, so fixing it here covers all three.
+        self._repair_ownership_if_needed()
         self.conn = sqlite3.connect(db_path, timeout=10.0)
         self.conn.row_factory = sqlite3.Row
         # busy_timeout FIRST so every later statement (including the WAL
@@ -58,6 +68,84 @@ class FindingStore:
                     raise
                 self.conn.rollback()
                 time.sleep(0.05 * (_attempt + 1))
+
+    def _repair_ownership_if_needed(self) -> None:
+        """Chown ids.db + WAL + SHM back to the workspace owner.
+
+        Mirrors utils/scratch_store.py and utils/cookie_jar.py.  When the
+        framework runs as root, SQLite creates ids.db, ids.db-wal, and
+        ids.db-shm as root-owned.  WAL mode needs write access to all three
+        DB files; a subsequent non-root run can't write the WAL/SHM sidecars
+        and gets "database is locked" instead of a clean permission error.
+
+        ids.db is shared with utils/sessions.py and
+        auxiliaries/framework_status.py — fixing it here covers all three
+        callers since they open the same physical file.
+        """
+        import logging
+        log = logging.getLogger(__name__)
+        db_p = Path(self.db_path)
+        workspace_root = Path(os.getenv("WORKSPACE_ROOT", ".")).resolve()
+
+        try:
+            ws_stat = workspace_root.stat()
+            target_uid = ws_stat.st_uid
+            target_gid = ws_stat.st_gid
+        except OSError:
+            return
+
+        if target_uid == 0:
+            return  # workspace is root-owned; consistent
+
+        is_root = os.geteuid() == 0
+        files_to_check = [
+            db_p,
+            db_p.with_name(db_p.name + "-wal"),
+            db_p.with_name(db_p.name + "-shm"),
+        ]
+
+        needs_repair = False
+        for f in files_to_check:
+            try:
+                if f.exists() and f.stat().st_uid == 0:
+                    needs_repair = True
+                    break
+            except OSError:
+                pass
+
+        if not needs_repair:
+            return
+
+        if not is_root:
+            log.warning(
+                "[findings] %s and/or WAL/SHM files are root-owned but "
+                "the framework is running as non-root (uid=%d). SQLite WAL "
+                "mode needs write access to all three DB files. The findings "
+                "store will fail with 'database is locked' on writes. Fix: "
+                "run once as root to trigger the auto-repair, or run: "
+                "sudo chown %d:%d %s %s-wal %s-shm",
+                db_p, os.geteuid(), target_uid, target_gid, db_p, db_p, db_p,
+            )
+            return
+
+        import subprocess
+        chown_spec = f"{target_uid}:{target_gid}"
+        for f in files_to_check:
+            if f.exists():
+                try:
+                    subprocess.run(
+                        ["chown", chown_spec, str(f)],
+                        check=False, capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
+        log.info(
+            "[findings] Root guard: chowned ids.db + WAL + SHM back to "
+            "uid=%d (workspace owner). A prior root run had root-owned "
+            "these files, which would make the next non-root run fail with "
+            "'database is locked'.",
+            target_uid,
+        )
 
     def _init_table(self) -> None:
         self.conn.execute(

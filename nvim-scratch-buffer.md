@@ -283,10 +283,24 @@ The lifecycle:
 
 1. **Open** (`BufReadPost`/`BufNewFile` on `/tmp/tmp*`) — header injected into
    the *buffer* + `ft=python` set. pyright sees it; the file on disk doesn't.
-2. **Write** (`BufWritePre`) — header stripped from the buffer before the file
-   is written. The file on disk contains exactly what the operator typed.
-3. **Post-write** (`BufWritePost`) — header re-injected so pyright keeps
-   seeing it for continued editing.
+2. **Write** (`BufWritePre`) — format-on-save disabled for the buffer, then
+   header stripped from the buffer before the file is written. The file on
+   disk contains exactly what the operator typed.
+3. **Post-write** (`BufWritePost`) — format-on-save restored, header
+   re-injected so pyright keeps seeing it for continued editing.
+
+> **Why format-on-save is disabled on write (2026-10-10 fix):** LazyVim's
+> `conform.nvim` runs on `BufWritePre` and can reorganize imports — moving
+> `from framework_tools import *` out of the header position into the
+> script's import block. This corrupted the splice: `strip_header` (then
+> using a fuzzy `find("framework_tools")` check) would match the relocated
+> import line, then unconditionally delete lines 0–1 — which were *script
+> content*, not the header. The fix: (a) `header_at_top()` does **exact line
+> matching** against the known header, never a fuzzy substring search; (b)
+> `strip_header` only fires when the exact header is at lines 0–1; (c)
+> `format_on_save` is disabled on `BufWritePre` and restored on
+> `BufWritePost`, so the formatter can't relocate the header between strip
+> and re-inject.
 
 Manual: `<leader>fc` / `:FrameworkCell` injects into any buffer (idempotent).
 Opt out: `vim.g.fwcell_no_autostamp = true`. Disable: `vim.g.fwcell_disable

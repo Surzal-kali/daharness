@@ -273,10 +273,101 @@ class CookieJarStore:
                 parent.mkdir(parents=True, exist_ok=True)
             except OSError:
                 pass  # e.g. root-owned dir while running as non-root: connect will tell us
+        # Root guard (mirrors utils/scratch_store.py): chown the DB + WAL +
+        # SHM files back to the workspace owner BEFORE opening the connection.
+        # A prior root run (bootstrap/IPython for masscan/packetcraft) leaves
+        # these root-owned; WAL mode needs write access to all three files,
+        # and a non-root process that can't write the WAL/SHM sidecars gets
+        # "database is locked" instead of a clean permission error.
+        self._repair_ownership_if_needed()
         self._conn = sqlite3.connect(str(self.db_path), timeout=10.0, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+
+    def _repair_ownership_if_needed(self) -> None:
+        """Chown cookie-jar DB + WAL + SHM back to the workspace owner.
+
+        Mirrors utils/scratch_store.py's root guard.  When the framework
+        runs as root (masscan/packetcraft/IPython REPL), SQLite creates
+        cookie_jar.db, cookie_jar.db-wal, and cookie_jar.db-shm as
+        root-owned.  WAL mode needs write access to all three DB files; a
+        subsequent non-root run (the agent / gemma) can't write the WAL/SHM
+        sidecars and gets "database is locked" instead of a clean permission
+        error — which looks like contention rather than the real cause.
+
+        When root: chown the files back to the owner of WORKSPACE_ROOT.
+        When non-root and the files are root-owned: warn loudly (can't
+        chown; operator must restart as root once to trigger the repair or
+        chown manually).  Never raises — a failed chown is logged but
+        doesn't block the store (the non-root process can still read the
+        main DB file; it just degrades to a locked-write failure that the
+        operator will see and fix).
+        """
+        import logging
+        log = logging.getLogger(__name__)
+        db_p = self.db_path
+        workspace_root = Path(os.getenv("WORKSPACE_ROOT", ".")).resolve()
+
+        try:
+            ws_stat = workspace_root.stat()
+            target_uid = ws_stat.st_uid
+            target_gid = ws_stat.st_gid
+        except OSError:
+            return
+
+        if target_uid == 0:
+            return  # workspace is root-owned; consistent
+
+        is_root = os.geteuid() == 0
+        files_to_check = [
+            db_p,
+            db_p.with_name(db_p.name + "-wal"),
+            db_p.with_name(db_p.name + "-shm"),
+        ]
+
+        needs_repair = False
+        for f in files_to_check:
+            try:
+                if f.exists() and f.stat().st_uid == 0:
+                    needs_repair = True
+                    break
+            except OSError:
+                pass
+
+        if not needs_repair:
+            return
+
+        if not is_root:
+            log.warning(
+                "[cookie_jar] %s and/or WAL/SHM files are root-owned but "
+                "the framework is running as non-root (uid=%d). SQLite WAL "
+                "mode needs write access to all three DB files. The jar will "
+                "fail with 'database is locked' on writes. Fix: run once as "
+                "root to trigger the auto-repair, or run: sudo chown %d:%d "
+                "%s %s-wal %s-shm",
+                db_p, os.geteuid(), target_uid, target_gid, db_p, db_p, db_p,
+            )
+            return
+
+        import subprocess
+        chown_spec = f"{target_uid}:{target_gid}"
+        for f in files_to_check:
+            if f.exists():
+                try:
+                    subprocess.run(
+                        ["chown", chown_spec, str(f)],
+                        check=False, capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
+        log.info(
+            "[cookie_jar] Root guard: chowned cookie_jar DB + WAL + SHM "
+            "back to uid=%d (workspace owner). A prior root run had "
+            "root-owned these files, which would make the next non-root run "
+            "fail with 'database is locked'.",
+            target_uid,
+        )
 
     # -- internals ----------------------------------------------------------
 

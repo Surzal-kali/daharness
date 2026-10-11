@@ -124,10 +124,33 @@ def generate_pyi(alias_map: Dict[str, Any]) -> str:
         "_build_docstring on the live discovery manifests — not re-derived,",
         "so editor-side stubs cannot drift from what actually executes.",
         "",
+        "Stdlib convenience modules + bare functions are also injected —",
+        "see the stdlib overlay section at the bottom of this file.",
+        "",
         "Hover (K in nvim) shows each wrapper's manifest-backed docstring.",
         '"""',
         "",
         "from typing import Any",
+        "import asyncio",
+        "import json",
+        "import os",
+        "import sys",
+        "import time",
+        "import pathlib",
+        "import base64",
+        "import hashlib",
+        "import datetime",
+        "import ipaddress",
+        "import re",
+        "import socket",
+        "import subprocess",
+        "import random",
+        "import string",
+        "import textwrap",
+        "import pprint",
+        "import traceback",
+        "import struct",
+        "import urllib.parse",
         "",
     ]
 
@@ -152,6 +175,22 @@ def generate_pyi(alias_map: Dict[str, Any]) -> str:
         if meta:
             body.append("    # " + " | ".join(meta))
 
+    # ── Stdlib bare functions (hoisted to top-level in the REPL) ────────
+    body.append("")
+    body.append("# ── Stdlib convenience bares (pre-imported in the REPL) ─────────────")
+    body.append("sleep = time.sleep  # type: ignore[assignment]")
+    body.append("b64decode = base64.b64decode  # type: ignore[assignment]")
+    body.append("b64encode = base64.b64encode  # type: ignore[assignment]")
+    body.append("pp = pprint.pprint  # type: ignore[assignment]")
+    body.append("pformat = pprint.pformat  # type: ignore[assignment]")
+    body.append("pprint = pprint.pprint  # type: ignore[assignment]")
+    body.append("urlsplit = urllib.parse.urlsplit  # type: ignore[assignment]")
+    body.append("urljoin = urllib.parse.urljoin  # type: ignore[assignment]")
+    body.append("quote = urllib.parse.quote  # type: ignore[assignment]")
+    body.append("unquote = urllib.parse.unquote  # type: ignore[assignment]")
+    body.append("sha256 = hashlib.sha256  # type: ignore[assignment]")
+    body.append("md5 = hashlib.md5  # type: ignore[assignment]")
+
     return "\n".join(header) + "\n" + "\n".join(body) + "\n"
 
 
@@ -159,31 +198,39 @@ def build_shim(aliases) -> str:
     """Return the framework_tools.py shim text (PEP 562)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     n = len(aliases)
-    body = "\n".join("    " + repr(a) + "," for a in sorted(aliases))
-    return f'''"""PEP 562 shim — runtime-resolved framework tool aliases.
+    # Stdlib bare-function names injected by build_ipython_namespace.
+    stdlib_bares = sorted(tool_repl._STDLIB_BARES)
+    tool_body = "\n".join("    " + repr(a) + "," for a in sorted(aliases))
+    stdlib_body = "\n".join("    " + repr(a) + "," for a in stdlib_bares)
+    total = len(aliases) + len(stdlib_bares)
+    return f'''"""PEP 562 shim — runtime-resolved framework tool aliases + stdlib bares.
 
 {_HEADER_STAMP}
-Generated: {now} | Tools: {n}
+Generated: {now} | Tools: {n} | Stdlib bares: {len(stdlib_bares)} | Total: {total}
 
 Inside the framework REPL (tool_repl.py → the ``ipython`` command), the shell
-injects one async wrapper per discovered tool directly into ``user_ns``.  This
-shim surfaces those live objects to plain imports:
+injects one async wrapper per discovered tool directly into ``user_ns``, plus
+a set of pre-imported stdlib modules and bare functions (``sleep``, ``b64decode``,
+``sha256``, etc.).  This shim surfaces those live objects to plain imports:
 
     from framework_tools import *   # inside the REPL: binds the live wrappers
 
-``__all__`` covers every alias the REPL registers.  Star-import getattr's each
-``__all__`` entry, which triggers ``__getattr__``, which pulls the alias from
-the live shell (``get_ipython`` is a builtin inside IPython).  The aliases
-ALREADY exist in user_ns — this shim costs nothing at REPL time and exists for
-the header import in scratch cells.  Outside a live shell attribute access
-raises a descriptive AttributeError (never a silent None).
+``__all__`` covers every tool alias and stdlib bare name the REPL registers.
+Star-import getattr's each ``__all__`` entry, which triggers ``__getattr__``,
+which pulls the name from the live shell (``get_ipython`` is a builtin inside
+IPython).  The aliases ALREADY exist in user_ns — this shim costs nothing at
+REPL time and exists for the header import in scratch cells.  Outside a live
+shell attribute access raises a descriptive AttributeError (never a silent None).
 """
 
 import builtins
 from typing import Any
 
 __all__ = [
-{body}
+    # ── Tool aliases ───────────────────────────────────────────────────
+{tool_body}
+    # ── Stdlib bare functions ──────────────────────────────────────────
+{stdlib_body}
 ]
 
 
@@ -216,6 +263,7 @@ def main() -> int:
     manifests = tool_repl.discover_tools()
     alias_map = tool_repl.build_tool_aliases(manifests)
     aliases = sorted(alias_map)
+    stdlib_bare_count = len(tool_repl._STDLIB_BARES)
 
     pyi_text = generate_pyi(alias_map)
     shim_text = build_shim(aliases)
@@ -228,14 +276,15 @@ def main() -> int:
             and PY_FILE.read_text() == shim_text
         )
         state = "OK" if existing_ok else "STALE"
-        print(f"  {state}  {len(aliases)} tools, {PYI_FILE}")
+        print(f"  {state}  {len(aliases)} tools + {stdlib_bare_count} stdlib bares, {PYI_FILE}")
         return 0 if existing_ok else 1
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     PY_FILE.write_text(shim_text)
     PYI_FILE.write_text(pyi_text)
-    print(f"  Wrote {PYI_FILE} ({len(aliases)} tools)")
-    print(f"  Wrote {PY_FILE} (PEP 562 shim, __all__ = {len(aliases)} aliases)")
+    total = len(aliases) + stdlib_bare_count
+    print(f"  Wrote {PYI_FILE} ({len(aliases)} tools + {stdlib_bare_count} stdlib bares)")
+    print(f"  Wrote {PY_FILE} (PEP 562 shim, __all__ = {total} entries)")
     print(f"  nvim pyright extraPaths → {OUT_DIR}")
     return 0
 

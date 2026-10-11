@@ -551,6 +551,74 @@ def _make_tool_wrapper(manifest: ToolManifest, manifests_list: List[ToolManifest
     return _wrapper
 
 
+# ── Stdlib convenience overlay for the IPython namespace ─────────────────────
+#
+# IPython gives you the full Python language, but bare builtins like ``sleep``
+# or common stdlib functions like ``json.dumps`` aren't pre-imported — you have
+# to ``import json`` first.  In a security workflow you're constantly doing
+# things like ``sleep(30)`` after launching a background job, ``json.dumps`` on
+# a tool result, ``base64.b64decode`` on a blob, or ``hashlib.sha256`` on a
+# payload.  This overlay pre-imports those so they're one keystroke away.
+#
+# Modules are injected as themselves (``json``, ``os``, ``hashlib``) so tab-
+# completion and ``?`` introspection work.  A few bare functions are exposed
+# at the top level (``sleep``, ``b64decode``, ``b64encode``, ``pprint``) for
+# the ones you reach for most — the rest are available as ``module.func``.
+
+import base64 as _base64
+import hashlib as _hashlib
+import datetime as _datetime
+import ipaddress as _ipaddress
+import re as _re
+import socket as _socket
+import subprocess as _subprocess
+import random as _random
+import string as _string
+import textwrap as _textwrap
+import pprint as _pprint
+import urllib.parse as _urlparse
+
+_STDLIB_MODULES: Dict[str, Any] = {
+    "asyncio": asyncio,
+    "json": json,
+    "os": os,
+    "sys": sys,
+    "time": time,
+    "pathlib": __import__("pathlib"),
+    "base64": _base64,
+    "hashlib": _hashlib,
+    "datetime": _datetime,
+    "ipaddress": _ipaddress,
+    "re": _re,
+    "socket": _socket,
+    "subprocess": _subprocess,
+    "random": _random,
+    "string": _string,
+    "textwrap": _textwrap,
+    "pprint": _pprint,
+    "traceback": traceback,
+    "struct": struct,
+    "urllib": __import__("urllib"),
+}
+
+# Bare functions hoisted to top-level for ergonomics — the ones you'd
+# otherwise type ``from X import Y`` for every session.
+_STDLIB_BARES: Dict[str, Any] = {
+    "sleep": time.sleep,
+    "b64decode": _base64.b64decode,
+    "b64encode": _base64.b64encode,
+    "pp": _pprint.pprint,
+    "pformat": _pprint.pformat,
+    "urlsplit": _urlparse.urlsplit,
+    "urljoin": _urlparse.urljoin,
+    "quote": _urlparse.quote,
+    "unquote": _urlparse.unquote,
+    "sha256": _hashlib.sha256,
+    "md5": _hashlib.md5,
+    "pprint": _pprint.pprint,
+}
+
+
 def build_ipython_namespace(
     manifests: List[ToolManifest],
 ) -> Dict[str, Any]:
@@ -567,8 +635,18 @@ def build_ipython_namespace(
         aliases, collected for ``tools.<Tab>`` browsing)
       • ``sessions()``, ``scope_on()``, ``scope_off()``, ``scope_status()``,
         ``scope_search()`` — operator command wrappers
+      • Stdlib convenience overlay — common modules (``json``, ``os``,
+        ``hashlib``, ``base64``, ``socket``, ``re``, ``subprocess``,
+        ``datetime``, ``ipaddress``, …) and bare functions (``sleep``,
+        ``b64decode``, ``b64encode``, ``pp``, ``sha256``, ``urlsplit``, …)
+        pre-imported so you don't have to ``import`` them mid-session.
     """
     ns: Dict[str, Any] = {}
+
+    # ── Stdlib convenience overlay (injected first so tool aliases win
+    #    on any name collision — unlikely but deterministic) ────────────
+    ns.update(_STDLIB_MODULES)
+    ns.update(_STDLIB_BARES)
 
     # ── Tool wrappers ───────────────────────────────────────────────────
     alias_map = build_tool_aliases(manifests)
@@ -2276,6 +2354,9 @@ Tool REPL commands:
   ipython                Drop into IPython with tools as named async callables
                          (Tab-completion on tool names + params, tool? introspection,
                          cell-based chaining).  await nmap(target=...), await ffuf(...), etc.
+                         Stdlib modules pre-imported: json, os, socket, hashlib, base64,
+                         re, subprocess, datetime, ipaddress, etc.  sleep(30), b64decode(),
+                         sha256(), pp() available as bare names.
   scope on <handle> [--platform h1|bugcrowd|intigriti] [--no-strict] [--ip-boundary]
                          Arm the packet-scope gate (send_packet refuses
                          out-of-scope destinations; operator-only, not exposed
@@ -2729,6 +2810,13 @@ async def repl_loop(manifests: List[ToolManifest]):
                 print()
                 print("  Also: tools  (dict of all wrappers),  manifests  (list),")
                 print("        manifest_by_id('full.tool.id'),  run_tool,  resolve_callable")
+                print()
+                print("  ── Stdlib convenience (pre-imported) ──")
+                print("    Modules: json, os, sys, time, asyncio, socket, subprocess, re,")
+                print("             hashlib, base64, datetime, ipaddress, pathlib, struct,")
+                print("             random, string, textwrap, pprint, traceback, urllib")
+                print("    Bares:   sleep(30), b64decode(...), b64encode(...), pp(obj),")
+                print("             sha256(data), md5(data), urlsplit(...), quote(...), unquote(...)")
                 print()
                 print("  ── UI upgrades ──")
                 print(f"    Syntax highlighting: ON (colors={_IPYTHON_COLORS})")
