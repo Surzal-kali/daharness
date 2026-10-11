@@ -195,16 +195,17 @@ def project_result(
     # Unwrap the executor transport envelope before projecting.
     #
     # The in-process/BRAIN_DISPATCH executor wraps every tool result as
-    # ``{"stdout": <json str>, "status": "Success"|"Failed", "result": <raw>}``
-    # (see daharness/executor.py:_wrap_launch_result).  Without unwrapping,
-    # the digest/page adapters run on the *envelope*, not the tool result:
-    # e.g. nmap_status's adapter read ``status="Success"`` (the envelope's
-    # transport status) and ``open_ports=[]`` (nested under ``result``, not
-    # at top level), so the digest reported 0 open ports while the scratch
-    # copy held the real 2.  The stored scratch payload and the envelope the
-    # model sees must both carry the tool's own fields.
+    # ``{"status": "Success"|"Failed", "result": <raw>}`` — and optionally
+    # ``stdout`` when the tool returned a bare string (no structured data to
+    # duplicate).  Without unwrapping, the digest/page adapters run on the
+    # *envelope*, not the tool result: e.g. nmap_status's adapter read
+    # ``status="Success"`` (the envelope's transport status) and
+    # ``open_ports=[]`` (nested under ``result``, not at top level), so the
+    # digest reported 0 open ports while the scratch copy held the real 2.
+    # The stored scratch payload and the envelope the model sees must both
+    # carry the tool's own fields.
     envelope_status = ""
-    if "result" in result and "stdout" in result and "status" in result:
+    if "result" in result and "status" in result:
         envelope_status = str(result.get("status", "")).lower()
         result = result["result"]
         if not isinstance(result, dict):
@@ -330,8 +331,10 @@ def _project_large(
       so a single pathological response can't blow up context.
     """
     # Unwrap executor envelope first (same logic as digest/page path).
+    # The envelope is ``{"status": ..., "result": <raw>}`` — stdout is
+    # optional and only present for bare-string tool results.
     envelope_status = ""
-    if "result" in result and "stdout" in result and "status" in result:
+    if "result" in result and "status" in result:
         envelope_status = str(result.get("status", "")).lower()
         result = result["result"]
         if not isinstance(result, dict):

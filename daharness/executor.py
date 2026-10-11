@@ -236,17 +236,21 @@ class ExecutorMixin:
                 return None, False
 
             result_value = envelope.get("result")
-            stdout = result_value if result_value is not None else (error_msg or "")
-            if not isinstance(stdout, str):
-                stdout = json.dumps(stdout, default=str)
 
             shaped: Dict[str, Any] = {
-                "stdout": stdout,
                 "status": "Success" if status == "success" else "Failed",
             }
             # Pass through structured result data for typed callers.
+            # stdout is NOT a stringified copy of result — that doubled
+            # context on every tool call.  stdout is included only when the
+            # Brain returned a bare string (no structured result) or an error
+            # message (so the model sees the text).
             if result_value is not None and not isinstance(result_value, str):
                 shaped["result"] = result_value
+            elif result_value is not None and isinstance(result_value, str):
+                shaped["stdout"] = result_value
+            elif error_msg:
+                shaped["stdout"] = error_msg
             if status != "success" and error_msg:
                 shaped["error"] = error_msg
             return shaped, False
@@ -398,13 +402,18 @@ class ExecutorMixin:
 
     @staticmethod
     def _wrap_launch_result(result: Any) -> Dict[str, Any]:
-        """Shape an in-process result like the Brain's {'stdout', 'status'}."""
+        """Shape an in-process result into the executor transport envelope.
+
+        The envelope carries the *structured* result under ``result`` and the
+        transport status under ``status``.  ``stdout`` is included ONLY when
+        the tool returned a bare string (no structured data to duplicate) or
+        when the tool's own dict already has a ``stdout`` key (e.g. ssh_exec,
+        fastcgi — real subprocess output, not a stringified copy).  When
+        ``result`` is present, ``stdout`` is never a second serialization of
+        the same data — that doubled context on every tool call for no reason.
+        """
         if result is None:
-            # A None return usually means a precondition failed (e.g. the
-            # Metasploit console handle is missing). Reporting that as
-            # 'Success' made the secretary narrate failures as successes.
             return {
-                "stdout": "",
                 "result": None,
                 "status": "Failed",
                 "error": "Tool returned no result (precondition likely not met)",
@@ -419,28 +428,30 @@ class ExecutorMixin:
             # it as Success just because it's a dict.
             existing_status = result.get("status")
             if existing_status in ("Success", "Failed", "unknown_delivery"):
-                # Pass through with a stdout fallback so the agent layer
-                # can still surface the human-readable text.  "unknown_delivery"
-                # (send_to_listener) is a third, honest status: the write was
-                # interrupted and we don't know if bytes went out — it must NOT
-                # be relabeled Success or the secretary will narrate a maybe-
-                # failure as a success and skip the read_listener check.
-                wrapped = {
-                    "stdout": result.get("stdout") or json.dumps(result, default=str),
+                # "unknown_delivery" (send_to_listener) is a third, honest
+                # status: the write was interrupted and we don't know if bytes
+                # went out — it must NOT be relabeled Success or the secretary
+                # will narrate a maybe-failure as a success and skip the
+                # read_listener check.
+                wrapped: Dict[str, Any] = {
                     "status": existing_status,
                     "result": result,
                 }
+                # Preserve a real stdout from the tool's own output (ssh_exec,
+                # fastcgi, etc. carry genuine subprocess stdout — not a
+                # stringified copy of the result dict).
+                tool_stdout = result.get("stdout")
+                if isinstance(tool_stdout, str) and tool_stdout:
+                    wrapped["stdout"] = tool_stdout
                 if "error" in result:
                     wrapped["error"] = result["error"]
                 return wrapped
             return {
-                "stdout": json.dumps(result, default=str),
                 "result": result,
                 "status": "Success",
             }
         if isinstance(result, (list, int, float, bool)):
             return {
-                "stdout": json.dumps(result, default=str),
                 "result": result,
                 "status": "Success",
             }

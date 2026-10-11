@@ -136,7 +136,11 @@ or doesn't know the tool, execution falls back to `_launch_in_process()`:
    remaining attrs. Unbound methods are bound to a cached class instance
    (`_tool_instances`), preferring `get_instance()` if available.
 2. Async tools are awaited; sync tools run in `asyncio.to_thread()`.
-3. Results are wrapped as `{"stdout", "status"}` dicts.
+3. Results are wrapped as `{"status", "result"}` envelopes. `stdout` is
+   included only when the tool returned a bare string (no structured data) —
+   it is never a stringified copy of `result` (that doubled context on every
+   tool call). Tools that return their own `stdout` key (ssh_exec, fastcgi —
+   real subprocess output) preserve it inside `result`.
 
 **Important:** if the Brain accepted the call but timed out
 (`BRAIN_DISPATCH_TIMEOUT`, default 600s), the result is a failure and the

@@ -208,12 +208,9 @@ class TestExecutorEnvelopeUnwrap:
     before projecting, so digest/page adapters run on the tool's own fields.
 
     The in-process/BRAIN_DISPATCH executor wraps every result as
-    ``{"stdout": <json>, "status": "Success", "result": <raw tool dict>}``.
-    Without unwrapping, the nmap_status digest adapter read ``status="Success"``
-    (the envelope's transport status) and ``open_ports=[]`` (nested under
-    ``result``, absent at top level), so the digest reported 0 open ports
-    while the scratch copy held the real 2.  Bug reproduced 2026-10-01
-    against 192.168.56.106 (2 open ports: 22/tcp, 8080/tcp).
+    ``{"status": "Success", "result": <raw tool dict>}`` — ``stdout`` is
+    optional and only present for bare-string tool results (never a
+    stringified copy of ``result``).
     """
 
     def test_digest_unwraps_envelope_before_adapter(self, store):
@@ -233,7 +230,6 @@ class TestExecutorEnvelopeUnwrap:
             "full_output": "Nmap scan report...\n" * 500,
         }
         envelope = {
-            "stdout": __import__("json").dumps(raw, default=str),
             "status": "Success",
             "result": raw,
         }
@@ -256,7 +252,7 @@ class TestExecutorEnvelopeUnwrap:
         """A Failed transport envelope is unwrapped and the raw error result
         is returned in full (not digested)."""
         raw = {"error": "brain timeout", "status": "Failed"}
-        envelope = {"stdout": "{}", "status": "Failed", "result": raw}
+        envelope = {"status": "Failed", "result": raw}
         projected = project_result(
             envelope, result_mode="digest", tool_id="test.tool", agent_id="a",
         )

@@ -460,7 +460,6 @@ class MetasploitClient:
             inferred = module_path.split("/", 1)[0]
             if inferred != category:
                 return {
-                    "stdout": "",
                     "status": "Failed",
                     "error": (
                         f"Category mismatch: module_path '{module_path}' starts "
@@ -478,7 +477,6 @@ class MetasploitClient:
             session_id = options.get("SESSION") if isinstance(options, dict) else None
             if session_id is None or session_id == "":
                 return {
-                    "stdout": "",
                     "status": "Failed",
                     "error": (
                         "category='post' requires a 'SESSION' option (the numeric "

@@ -622,10 +622,11 @@ _STDLIB_BARES: Dict[str, Any] = {
 # ── Envelope helpers: find / pluck / grep on large tool results ──────────────
 #
 # Tool results in the REPL are plain dicts sitting in variables (``r``, ``out``,
-# whatever you assigned).  The structured payload is usually under
-# ``result["result"]`` (a dict/list tree), while ``result["stdout"]`` is the
-# stringified version.  These helpers walk that tree so you don't have to
-# remember the shape or write a 5-line comprehension every time.
+# whatever you assigned).  The structured payload is under ``result["result"]``
+# (a dict/list tree).  ``result["stdout"]`` is present only when the tool
+# returned a bare string — it is never a stringified copy of ``result``.
+# These helpers walk that tree so you don't have to remember the shape or
+# write a 5-line comprehension every time.
 #
 #   find(r, "open_ports")        → list of all values at any key "open_ports"
 #   find(r, "port", value=80)    → list of {key:"port", value:80, path:"..."} dicts
@@ -660,24 +661,30 @@ def _value_matches(actual: Any, expected: Any) -> bool:
 def _envelope_payload(envelope: Any) -> Any:
     """Unwrap a tool result envelope to its structured payload.
 
-    If it's a dict with ``result`` + ``stdout`` + ``status`` (the standard
-    executor envelope), return ``result`` (or ``stdout`` if result is missing).
-    Otherwise return the input unchanged — the operator may have passed the
+    The executor envelope is ``{"status": ..., "result": <raw>}`` — and
+    optionally ``stdout`` when the tool returned a bare string (no structured
+    data to duplicate).  If ``result`` is present, return it.  Otherwise fall
+    back to ``stdout`` (parsing it as JSON if possible).  If neither is
+    present, return the input unchanged — the operator may have passed the
     payload directly.
     """
-    if isinstance(envelope, dict) and "stdout" in envelope and "status" in envelope:
-        inner = envelope.get("result")
-        if inner is not None:
-            return inner
-        # stdout is usually a JSON string — try to parse it
-        raw = envelope.get("stdout", "")
-        if isinstance(raw, str) and raw:
-            try:
-                return json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                return raw
-        return raw
-    return envelope
+    if not isinstance(envelope, dict):
+        return envelope
+    # Envelope detection: needs a transport status + at least one payload key.
+    if "status" not in envelope:
+        return envelope
+    inner = envelope.get("result")
+    if inner is not None:
+        return inner
+    # stdout is only present when there's no structured result (bare string
+    # tool output, or legacy envelopes).  Try to parse it as JSON.
+    raw = envelope.get("stdout", "")
+    if isinstance(raw, str) and raw:
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
+    return raw
 
 
 def find(envelope: Any, key: str, value: Any = _MISSING) -> List[Any]:
@@ -2406,17 +2413,22 @@ def print_result(result: Dict[str, Any]):
         print("  ⚠ degraded: Brain socket down — executed IN-PROCESS in this REPL.")
         print("    Any session opened by this call is REPL-local (the agent cannot see it).")
 
-    stdout = result.get("stdout", "")
-    if stdout:
-        display = stdout[:2000] if len(stdout) > 2000 else stdout
-        if len(stdout) > 2000:
-            display += f"\n  ... ({len(stdout) - 2000} more chars)"
-        print(f"  stdout:\n{display}")
-
+    # Result and stdout are mutually exclusive in the new envelope: when
+    # structured data is present under "result", there is no stringified
+    # "stdout" copy of it.  Print whichever exists — never both.
     res = result.get("result")
     if res is not None:
         display = json.dumps(res, default=str, indent=2)[:2000]
+        if len(json.dumps(res, default=str)) > 2000:
+            display += "\n  ... (more data elided)"
         print(f"  result:\n{display}")
+    else:
+        stdout = result.get("stdout", "")
+        if stdout:
+            display = stdout[:2000] if len(stdout) > 2000 else stdout
+            if len(stdout) > 2000:
+                display += f"\n  ... ({len(stdout) - 2000} more chars)"
+            print(f"  stdout:\n{display}")
 
     error = result.get("error")
     if error:
@@ -2516,14 +2528,19 @@ async def _brain_call(tool_id: str, arguments: Dict[str, Any], brain_session: in
     status = str(envelope.get("status", "")).lower()
     error_msg = envelope.get("error")
     result_value = envelope.get("result")
-    stdout = result_value if result_value is not None else (error_msg or "")
-    if not isinstance(stdout, str):
-        stdout = json.dumps(stdout, default=str)
     shaped: Dict[str, Any] = {
-        "stdout": stdout,
         "status": "Success" if status == "success" else "Failed",
         "_elapsed_s": round(time.monotonic() - start, 2),
     }
+    # stdout is NOT a stringified copy of result — that doubled context.
+    # Include stdout only when the Brain returned a bare string (no
+    # structured result) or an error message.
+    if result_value is not None and not isinstance(result_value, str):
+        shaped["result"] = result_value
+    elif result_value is not None and isinstance(result_value, str):
+        shaped["stdout"] = result_value
+    elif error_msg:
+        shaped["stdout"] = error_msg
     if status != "success" and error_msg:
         shaped["error"] = error_msg
     return shaped
