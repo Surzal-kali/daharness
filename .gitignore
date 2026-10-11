@@ -10,6 +10,9 @@ ids.db
 *.sqlite3
 *.memory/
 chroma-data/
+# --- Brain sidecar socket + lock dir (shared across container lanes via the
+# bind-mounted tree; see constants.brain_socket_path) ---
+/run/
 .zap_home/
 .pw-browsers/
 findings_md/
@@ -39,6 +42,9 @@ docs/*
 framework.env
 *.pem
 dockered/.webui_secret_key
+
+# --- notebook-intelligence container state (encrypted GH token, per-user config) ---
+dockered/jupyter-nbi/
 
 # --- local scratch ---
 WIP_*.*

@@ -41,7 +41,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-_DEFAULT_ROOT = Path(os.getenv("WORKSPACE_ROOT", "."))
+from constants import resolve_workspace_root
+
+_DEFAULT_ROOT = resolve_workspace_root()
 _DEFAULT_DB = _DEFAULT_ROOT / "scratch.db"
 _DEFAULT_DATA_DIR = _DEFAULT_ROOT / "scratch-data"
 
@@ -114,7 +116,7 @@ class ScratchStore:
 
         log = logging.getLogger(__name__)
         db_p = Path(self.db_path)
-        workspace_root = Path(os.getenv("WORKSPACE_ROOT", ".")).resolve()
+        workspace_root = resolve_workspace_root()
 
         # Determine the target owner: the UID of the workspace root dir.
         try:

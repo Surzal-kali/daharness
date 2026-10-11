@@ -146,10 +146,18 @@ services:
     volumes:
       - jupyter-workspace:/home/jovyan/work
       - /home/kali/github/stuff:/home/jovyan/framework
+      # Persist notebook-intelligence settings + the stored GitHub token so
+      # image rebuilds don't wipe the Copilot login. Contains credentials —
+      # gitignored as dockered/jupyter-nbi/.
+      - ./jupyter-nbi:/home/jovyan/.jupyter/nbi
     environment:
       - JUPYTER_TOKEN=${JUPYTER_TOKEN}
       - FRAMEWORK_GATEWAY_URL=http://open-terminal:6000
       - JUPYTER_MAPPINGKERNELMANAGER_DEFAULT_KERNEL_NAME=daharness
+      # notebook-intelligence's native Ollama provider (and the `ollama` SDK
+      # it drives) default to localhost:11434, but Ollama runs on the host
+      # lab lane — same address the open-webui service uses for its LLM.
+      - OLLAMA_HOST=http://192.168.56.1:11434
     command:
       - start-notebook.py
       - --ServerApp.ip=0.0.0.0

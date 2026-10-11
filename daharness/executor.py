@@ -13,6 +13,7 @@ import inspect
 import json
 import logging
 import os
+import struct
 import subprocess
 import sys
 import threading
@@ -20,11 +21,35 @@ from typing import Any, Dict, Optional
 
 from pydantic import ValidationError
 
-from constants import TransportType
+from constants import TransportType, brain_socket_path
 from .models import ToolManifest
 from .preflight import normalize_arguments, validate_against_manifest
 
 logger = logging.getLogger(__name__)
+
+
+# Byte-identical local framing for Brain dispatch when listeners.thebrain
+# cannot be imported — its module-level ctypes CDLL load of frameit.so is a
+# host-compiled artifact that may not load in a container lane, and the
+# socket is now legitimately reachable from inside one. 4-byte big-endian
+# length prefix, same wire format as listeners.thebrain.pack_message (the
+# same pattern tool_repl's _brain_pack/_brain_read_message use).
+_HEADER_FORMAT = "!I"
+_MAX_MESSAGE_SIZE = 10 * 1024 * 1024
+
+
+def _brain_pack_message(payload: bytes) -> bytes:
+    return struct.pack(_HEADER_FORMAT, len(payload)) + payload
+
+
+async def _brain_read_message(reader) -> bytes:
+    header = await reader.readexactly(struct.calcsize(_HEADER_FORMAT))
+    (length,) = struct.unpack(_HEADER_FORMAT, header)
+    if length > _MAX_MESSAGE_SIZE:
+        raise ValueError(
+            f"declared message length {length} exceeds max {_MAX_MESSAGE_SIZE}"
+        )
+    return await reader.readexactly(length)
 
 
 class ExecutorMixin:
@@ -106,7 +131,9 @@ class ExecutorMixin:
         """Dispatch a tool call, launching the decorated function directly.
 
         Order of preference:
-        1. Brain UDS socket (`/tmp/brain.sock`) when it is up and knows the tool.
+        1. Brain UDS socket (the checkout's ``run/brain.sock``, resolved via
+           ``brain_socket_path()`` — shared into container lanes by the tree's
+           bind mount) when it is up and knows the tool.
         2. In-process launch of the pythonic function — this is the fallback that
            keeps tools runnable when the Brain sidecar is down (its startup code
            unlinks the socket, and if the sidecar dies the socket goes with it,
@@ -154,7 +181,7 @@ class ExecutorMixin:
           ConnectionError, OSError); caller falls back in-process and
           should tag the result ``degraded``.
         """
-        socket_path = "/tmp/brain.sock"
+        socket_path = str(brain_socket_path())
         # A tool that never returns (a listener, a wedged subprocess, a slow
         # nmap -p- -sV, a sqlmap crawl) used to hang this read forever and freeze
         # the whole conversation. Bound it. 600s matches the tool budget the
@@ -200,8 +227,16 @@ class ExecutorMixin:
                     "status": "Failed",
                 }, False
 
-            # Use the framing logic to send/receive (consistent with the Brain)
-            from listeners.thebrain import pack_message, read_message
+            # Use the framing logic to send/receive (consistent with the Brain).
+            # Importing listeners.thebrain loads its ctypes frameit.so, which
+            # may not load in a container lane — and the shared socket makes
+            # dispatch from inside a container legitimate — so fall back to
+            # the local byte-identical framing above on any import failure.
+            try:
+                from listeners.thebrain import pack_message, read_message
+            except Exception:
+                pack_message = _brain_pack_message
+                read_message = _brain_read_message
             writer.write(pack_message(message.encode()))
             await writer.drain()
 

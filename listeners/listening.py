@@ -9,7 +9,7 @@ from asyncio import StreamReader, StreamWriter
 from typing import Any, Dict, List, Optional
 
 from listeners.thebrain import pack_message
-from constants import framework_tool
+from constants import framework_tool, brain_socket_path
 from utils.handles import format_handle, parse_handle
 from utils.session_manager import get_manager
 
@@ -204,7 +204,7 @@ class TCPListener:
     def __init__(self, host='0.0.0.0', port=8888):
         self.host = host
         self.port = port
-        self.brain_socket = "/tmp/brain.sock"
+        self.brain_socket = str(brain_socket_path())
         # Handle of this listener's SessionManager entry, so close_listener can
         # find and stop it.  Set by open_listener after registering.  NOTE:
         # this is the *last* opened listener's handle only — a single

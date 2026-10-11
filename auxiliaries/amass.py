@@ -56,7 +56,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeou
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from constants import framework_tool
+from constants import framework_tool, resolve_workspace_root
 from utils.background_job import launch_job, poll_job
 
 # --- bounded DNS resolver for the alive-check sweep -------------------------
@@ -603,10 +603,10 @@ def _load_scope(platform: Optional[str] = None, handle: Optional[str] = None) ->
     Lines starting with # are comments.
     """
     if platform and handle:
-        scope_file = (Path(os.getenv("WORKSPACE_ROOT", "."))
+        scope_file = (resolve_workspace_root()
                       / f"{platform}_{handle}.scope")
     else:
-        scope_file = Path(os.getenv("WORKSPACE_ROOT", ".")) / ".scope"
+        scope_file = resolve_workspace_root() / ".scope"
     if not scope_file.is_file():
         return None
     in_patterns: List[str] = []

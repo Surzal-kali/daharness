@@ -21,7 +21,7 @@ _FRAMEWORK_ROOT = Path(__file__).resolve().parent.parent
 if str(_FRAMEWORK_ROOT) not in sys.path:
     sys.path.insert(0, str(_FRAMEWORK_ROOT))
 
-from constants import TransportType, framework_tool
+from constants import TransportType, framework_tool, brain_socket_path
 from listeners.execution_tracker import EXECUTION_TRACKER
 
 # --- dedicated tool-executor pool (2026-09-25 executor-starvation fix) -------
@@ -277,7 +277,11 @@ HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 MAX_MESSAGE_SIZE = 10 * 1024 * 1024  # guard against bogus/oversized length headers
 
 lib = ctypes.CDLL(LIB_PATH)
-socket_path = "/tmp/brain.sock"
+# Bind path from the shared resolver: the socket lives in the checkout's
+# run/ dir so every lane that mounts this tree (host REPL, jupyter kernel,
+# open-terminal) reaches the SAME inode — a /tmp socket is per-namespace and
+# can never cross a container boundary. $BRAIN_SOCKET overrides.
+socket_path = str(brain_socket_path())
 
 # Tell ctypes the C signature: void send_event(const FrameworkEvent *event);
 lib.send_event.argtypes = [ctypes.POINTER(FrameworkEvent)]
@@ -348,13 +352,28 @@ async def start_brain():
     # never contend on it. lock_fh is deliberately kept referenced for the
     # lifetime of serve_forever(); closing it (implicit on exit) releases the
     # lock.
+    # Lock + socket live in the shared run/ dir (see brain_socket_path) so
+    # the singleton guard crosses container boundaries too: a lane that
+    # mounts this tree sees the same lockfile/socket inodes, and a second
+    # Brain is refused here instead of racing across separate /tmp
+    # namespaces (the duplicate-brain bug the old container entrypoint
+    # worked around). Prepare the dir first: world-writable so container
+    # lanes connect as a different uid and a restarted sidecar (possibly a
+    # different uid) can replace the socket.
+    sock_dir = os.path.dirname(socket_path) or "."
     try:
-        lock_fh = open("/tmp/brain.lock", "w")
-        lock_path = "/tmp/brain.lock"
+        os.makedirs(sock_dir, exist_ok=True)
+        os.chmod(sock_dir, 0o777)
+    except OSError as e:
+        print(f"[!] Could not prepare Brain socket dir {sock_dir}: {e}")
+    try:
+        lock_fh = open(os.path.join(sock_dir, "brain.lock"), "w")
+        lock_path = os.path.join(sock_dir, "brain.lock")
     except OSError:
         # Shared lockfile unwritable (poisoned ownership / immutable bit /
-        # MAC). Fall back to a uid-scoped lockfile so a bad /tmp/brain.lock
-        # can't kill the sidecar; the singleton guard then applies per-uid.
+        # MAC). Fall back to a uid-scoped lockfile in /tmp so a bad shared
+        # lock can't kill the sidecar; the singleton guard then applies
+        # per-uid.
         lock_path = f"/tmp/brain.lock-{os.geteuid()}"
         lock_fh = open(lock_path, "w")
     # Ensure the lock file is world-writable so a brain started as a
@@ -371,7 +390,7 @@ async def start_brain():
     except (BlockingIOError, OSError) as e:
         lock_fh.close()
         raise RuntimeError(
-            f"another Brain holds /tmp/brain.lock; refusing to start a second "
+            f"another Brain holds {lock_path}; refusing to start a second "
             f"Brain (orphan listening on an unlinked socket?). {e}"
         ) from e
 
@@ -395,12 +414,12 @@ async def start_brain():
             os.remove(socket_path)
         except PermissionError:
             # Stale socket owned by a different uid (e.g. root died and left
-            # it; we're non-root and /tmp has the sticky bit).  We can't
-            # remove it, but we also can't bind over it.  Fail with a clear
-            # message so the operator knows to delete it manually.
+            # it; we're non-root and the socket dir lacks write permission).
+            # We can't remove it, but we also can't bind over it.  Fail with
+            # a clear message so the operator knows to delete it manually.
             raise RuntimeError(
                 f"Stale socket {socket_path} is owned by a different user and "
-                f"cannot be removed (sticky bit on /tmp).  Run: "
+                f"cannot be removed.  Run: "
                 f"sudo rm {socket_path}"
             ) from None
 

@@ -26,12 +26,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from constants import framework_tool
+from constants import framework_tool, resolve_workspace_root
 
 
 def _cert_dir() -> Path:
     """Resolve the certs directory the same way the collaborator does."""
-    return Path(os.getenv("WORKSPACE_ROOT", ".")) / "utils" / "plugins" / "certs"
+    return resolve_workspace_root() / "utils" / "plugins" / "certs"
 
 
 @framework_tool(

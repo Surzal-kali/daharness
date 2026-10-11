@@ -22,6 +22,7 @@ if sys.version_info < MIN_PYTHON:
     sys.exit(1)
 
 from daharness import _chat, ToolRegistry, OllamaEmbeddingFunction
+from constants import brain_socket_path
 
 # --- .env loading (sudo-safe) ------------------------------------------------
 # When the framework is launched under sudo, the shell environment is stripped
@@ -229,7 +230,7 @@ class FrameworkLoader:
                 return
 
             # Wait for the socket so dispatchers don't race the sidecar
-            socket_path = "/tmp/brain.sock"
+            socket_path = str(brain_socket_path())
 
             async def _brain_ready() -> bool:
                 """True only when something is actually LISTENING on the socket.
@@ -251,7 +252,7 @@ class FrameworkLoader:
             # common case after a bootstrap restart whose previous brain
             # survived (start_new_session=True) and is still serving: spawning a
             # second would either bounce off the brain's flock/socket guard and
-            # log "exited early", or -- if /tmp/brain.sock was swept while the
+            # log "exited early", or -- if the socket file was swept while the
             # orphan listens on an unlinked inode -- slip past that guard and
             # produce TWO listeners on one path (the duplicate-brain bug).
             # Returning without appending a process to active_tasks is fine:
@@ -265,7 +266,7 @@ class FrameworkLoader:
             # Stream the Brain's output to a log file instead of PIPEs: nothing
             # ever drains PIPEs here, so once the Brain prints enough output the
             # pipe buffer fills, the sidecar blocks on write and effectively
-            # dies -- taking /tmp/brain.sock down with it (it unlinks the socket
+            # dies -- taking the Brain socket down with it (it unlinks the socket
             # on startup, so a crashed sidecar leaves NO socket behind).
             # Opened via _open_child_log so a poisoned/immutable /tmp/brain.log
             # can never kill the sidecar launch the way it killed ZAP.

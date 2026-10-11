@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from constants import framework_tool
+from constants import framework_tool, resolve_workspace_root
 
 # --- .env loading (sudo-safe) ------------------------------------------------
 # When the framework is launched under sudo, the shell environment is stripped
@@ -159,7 +159,7 @@ def _fetch_all_pages(path: str, *, params: Optional[Dict[str, Any]] = None,
 # --- manifest construction --------------------------------------------------
 
 def _scope_cache_path(handle: str, platform: str = "h1") -> Path:
-    d = Path(os.getenv("WORKSPACE_ROOT", ".")) / "scope"
+    d = resolve_workspace_root() / "scope"
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -671,7 +671,7 @@ def _write_scope_file(manifest: Dict[str, Any]) -> Optional[str]:
         if p:
             patterns.append("!" + p)
     platform = manifest.get("platform", "h1")
-    scope_path = (Path(os.getenv("WORKSPACE_ROOT", "."))
+    scope_path = (resolve_workspace_root()
                   / f"{platform}_{manifest.get('handle', 'unknown')}.scope")
     seen = set()
     lines = [f"# Auto-generated from {platform.upper()} program scope — do not edit by hand.",
@@ -889,7 +889,7 @@ def get_armed_scan_config() -> Optional[Dict[str, Any]]:
     discipline. Returns ``None`` when nothing is armed or no manifest is
     cached — callers then fall back to their own identification defaults.
     """
-    state_path = (Path(os.getenv("WORKSPACE_ROOT", "."))
+    state_path = (resolve_workspace_root()
                   / "scope" / ".armed_packet_scope.json")
     try:
         state = _json.loads(state_path.read_text())

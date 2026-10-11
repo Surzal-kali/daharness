@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from constants import framework_tool
+from constants import framework_tool, resolve_workspace_root
 from utils.handles import format_handle, parse_handle
 from utils.session_manager import get_manager
 from urllib.parse import parse_qs
@@ -63,7 +63,7 @@ _sm = get_manager()
 # --- config ------------------------------------------------------------------
 
 _COLLAB_DOMAIN = os.getenv("COLLAB_DOMAIN", "oob.lab")
-_CERT_DIR = Path(os.getenv("WORKSPACE_ROOT", ".")) / "utils" / "plugins" / "certs"
+_CERT_DIR = resolve_workspace_root() / "utils" / "plugins" / "certs"
 _HTTP_PORT = int(os.getenv("COLLAB_HTTP_PORT", "80"))
 _HTTPS_PORT = int(os.getenv("COLLAB_HTTPS_PORT", "443"))
 _DNS_PORT = int(os.getenv("COLLAB_DNS_PORT", "53"))
@@ -158,7 +158,7 @@ class CallbackStore:
         listener — the in-memory store still serves collab_poll.
         """
         try:
-            hits = (Path(os.getenv("WORKSPACE_ROOT", ".")) / "scope"
+            hits = (resolve_workspace_root() / "scope"
                     / "collab_hits.jsonl")
             hits.parent.mkdir(parents=True, exist_ok=True)
             with hits.open("a", encoding="utf-8") as f:

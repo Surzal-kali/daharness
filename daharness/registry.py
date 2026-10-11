@@ -25,7 +25,7 @@ from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from pydantic import ValidationError
 
-from constants import TransportType
+from constants import TransportType, resolve_workspace_root
 
 from ._param_docs import parse_param_docs, annotation_to_schema_type, annotation_to_schema_extras
 from .tool_tags import CANONICAL_TAGS, TOOL_TAGS, resolve_tags, tagged_doc
@@ -55,7 +55,10 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.56.1:11434/v1").r
 )
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "9000"))
-WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_ROOT", os.getcwd())).resolve()
+# Lane-safe: $WORKSPACE_ROOT when it exists (host lane), else this checkout —
+# container lanes bind-mount the tree (and the shared .env) elsewhere, so a
+# .env-pinned HOST path must not win inside them (silently empties discovery).
+WORKSPACE_ROOT = resolve_workspace_root()
 # A non-thinking chat model reliably drives the tool loop; reasoning/thinking
 # variants tend to hallucinate tools/executions instead of actually calling
 # them.  Override via the SECRETARY_MODEL env var to swap in another model.

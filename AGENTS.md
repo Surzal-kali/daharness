@@ -101,8 +101,11 @@ for embedding), and `_transport` (default `BRAIN_DISPATCH`).
 
 ### Brain Sidecar (`listeners/thebrain.py`)
 
-Unix domain socket server at `/tmp/brain.sock` with 4-byte big-endian
-length-prefixed message framing (`pack_message` / `read_message`).
+Unix domain socket server at the checkout's gitignored `run/brain.sock`
+(resolved via `constants.brain_socket_path()`, `$BRAIN_SOCKET` overrides) with 4-byte big-endian
+length-prefixed message framing (`pack_message` / `read_message`). The socket
+lives inside the tree so bind-mounted container lanes (jupyter kernel,
+open-terminal) reach the same socket as the host.
 
 **Startup sequence:**
 1. Probe for an existing live listener (refuses to start a second Brain).

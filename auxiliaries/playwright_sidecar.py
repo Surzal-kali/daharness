@@ -86,6 +86,8 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
+from constants import resolve_workspace_root
+
 try:
     from playwright.async_api import async_playwright, Error as PWError
     _HAS_PW = True
@@ -107,12 +109,10 @@ _BROWSER_DIR = ".pw-browsers"
 
 
 def _workspace_root() -> str:
-    """Resolve the framework root: $WORKSPACE_ROOT, else this module's
-    parent's parent (it lives at <root>/auxiliaries/playwright_sidecar.py)."""
-    wr = os.getenv("WORKSPACE_ROOT", "").strip()
-    if wr and os.path.isdir(wr):
-        return wr
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    """Resolve the framework root via the shared lane-safe resolver
+    (constants.resolve_workspace_root): $WORKSPACE_ROOT when it exists,
+    else this checkout."""
+    return str(resolve_workspace_root())
 
 
 def _resolve_browsers_path() -> None:

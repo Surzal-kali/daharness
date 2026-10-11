@@ -94,12 +94,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+from constants import resolve_workspace_root
+
 def _state_path() -> Path:
     """Resolve the armed-state file path at CALL time, not import time
     (matches program_scope's call-time ``os.getenv`` convention): a
     ``WORKSPACE_ROOT`` set after import still takes effect, and tests can
     redirect the state file per-call."""
-    return Path(os.getenv("WORKSPACE_ROOT", ".")) / "scope" / ".armed_packet_scope.json"
+    return resolve_workspace_root() / "scope" / ".armed_packet_scope.json"
 
 
 class ScopeGateError(Exception):

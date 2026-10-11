@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
 from .models import Finding
+from constants import resolve_workspace_root
 
 _DEFAULT_DB = str(Path(__file__).resolve().parent.parent / "ids.db")
 
@@ -85,7 +86,7 @@ class FindingStore:
         import logging
         log = logging.getLogger(__name__)
         db_p = Path(self.db_path)
-        workspace_root = Path(os.getenv("WORKSPACE_ROOT", ".")).resolve()
+        workspace_root = resolve_workspace_root()
 
         try:
             ws_stat = workspace_root.stat()

@@ -3,12 +3,12 @@ import importlib.util
 from impacket.smbconnection import SMBConnection
 from pathlib import Path
 
-from constants import framework_tool
+from constants import framework_tool, brain_socket_path
 from listeners.thebrain import pack_message
 
 class SMBScanner:
-    def __init__(self, brain_socket="/tmp/brain.sock"):
-        self.brain_socket = brain_socket
+    def __init__(self, brain_socket=None):
+        self.brain_socket = brain_socket or str(brain_socket_path())
 
     async def report_to_brain(self, event_type, session_id, data):
         """Pipes the finding back to the Brain sidecar."""

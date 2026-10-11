@@ -277,21 +277,29 @@ class TestGateLogic:
         res = g.arm("nope", "h1")
         assert not res["ok"] and "manifest" in res["error"].lower()
 
-    def test_scope_cache_path_survives_unwritable_workspace(self, monkeypatch):
+    def test_scope_cache_path_survives_unwritable_workspace(self, monkeypatch, tmp_path):
         """Regression (2026-09-25): _scope_cache_path used to mkdir() the
         workspace scope dir unconditionally, so an unwritable WORKSPACE_ROOT
         (sandboxed seat / stale .env pointing at another user's home) crashed
         arm() with a raw PermissionError instead of degrading to a cache
-        miss."""
+        miss. A MISSING root now resolves to the running checkout instead
+        (constants.resolve_workspace_root lane safety), so the degrade is
+        pinned with a root that EXISTS but is unwritable."""
         import tempfile
 
         import auxiliaries.program_scope as _ps
 
-        monkeypatch.setenv("WORKSPACE_ROOT", "/proc/definitely-not-writable")
-        p = _ps._scope_cache_path("synthetic", "h1")
-        fallback_root = Path(tempfile.gettempdir()) / "framework-scope-cache"
-        assert str(p).startswith(str(fallback_root)), p
-        assert p.parent.is_dir(), p
+        unwritable = tmp_path / "unwritable-root"
+        unwritable.mkdir()
+        unwritable.chmod(0o000)
+        try:
+            monkeypatch.setenv("WORKSPACE_ROOT", str(unwritable))
+            p = _ps._scope_cache_path("synthetic", "h1")
+            fallback_root = Path(tempfile.gettempdir()) / "framework-scope-cache"
+            assert str(p).startswith(str(fallback_root)), p
+            assert p.parent.is_dir(), p
+        finally:
+            unwritable.chmod(0o700)
 
     def test_disarm_restores_lab_mode(self, scope):
         _arm()

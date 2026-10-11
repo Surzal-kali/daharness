@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from constants import framework_tool
+from constants import framework_tool, resolve_workspace_root, brain_socket_path
 
 
 def _check_tcp(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -64,7 +64,7 @@ def framework_health() -> Dict[str, Any]:
     """Probe framework subsystems and return a health report.
 
     Checks:
-    - Brain sidecar UDS socket at /tmp/brain.sock
+    - Brain sidecar UDS socket (checkout run/brain.sock, via brain_socket_path())
     - Ollama API at the configured OLLAMA_BASE_URL
     - ChromaDB at the configured CHROMA_HOST:CHROMA_PORT
     - ZAP daemon at the configured ZAP_PORT
@@ -93,16 +93,17 @@ def framework_health() -> Dict[str, Any]:
     chroma_port = int(os.getenv("CHROMA_PORT", "9000"))
     zap_port = int(os.getenv("ZAP_PORT", "8090"))
 
-    workspace = Path(os.getenv("WORKSPACE_ROOT", os.getcwd())).resolve()
+    workspace = resolve_workspace_root()
     db_path = workspace / "ids.db"
 
     subsystems: Dict[str, Dict[str, Any]] = {}
 
     # Brain sidecar
-    brain_up = _check_unix_socket("/tmp/brain.sock")
+    brain_sock = str(brain_socket_path())
+    brain_up = _check_unix_socket(brain_sock)
     subsystems["brain_sidecar"] = {
         "up": brain_up,
-        "detail": "/tmp/brain.sock reachable" if brain_up else "socket not found — sidecar is down",
+        "detail": f"{brain_sock} reachable" if brain_up else "socket not found — sidecar is down",
     }
 
     # Ollama

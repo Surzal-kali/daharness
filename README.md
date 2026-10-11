@@ -77,7 +77,11 @@ A third transport, `MCP_RPC`, is reserved for external RPC integrations
 
 ### Brain Sidecar (`listeners/thebrain.py`)
 
-A Unix domain socket server (`/tmp/brain.sock`) with length-prefixed message
+A Unix domain socket server (the checkout's gitignored `run/brain.sock`,
+resolved via `constants.brain_socket_path()` — the socket lives inside the
+tree so bind-mounted container lanes such as the jupyter kernel reach the
+SAME socket as the host; a `/tmp` path would be per-namespace and unreachable
+across a container boundary) with length-prefixed message
 framing. At startup it scans `auxiliaries/`, `listeners/`, and `payloads/`
 for `@framework_tool` callables and primes its function registry before
 binding the socket. It dispatches `CALL_TOOL` events to registered Python

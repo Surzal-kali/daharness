@@ -34,6 +34,22 @@ COPY dockered/patch_jupyterlab_pypi.py /tmp/patch_jupyterlab_pypi.py
 RUN python /tmp/patch_jupyterlab_pypi.py \
     && rm -f /tmp/patch_jupyterlab_pypi.py
 
+# ─────────────────────────────────────────────────────────────────────────────
+# notebook-intelligence model-list patch (2026-10). Two defects in the 6.2.0
+# wheel break every AI lane in this container: the Copilot chat fallback list
+# carries premium ids that 400 with model_not_supported on the lab's
+# free_educational_quota SKU (which also marks every /models entry
+# model_picker_enabled=false, so the dynamic catalogue is always empty), and
+# the native Ollama inline-completion provider hardcodes untagged model ids
+# that only resolve to :latest tags this Ollama host doesn't have. The patch
+# swaps in the verified working Copilot ids and the host's actual installed
+# model tags. See patch_nbi_providers.py for details; exact-text hunks, so a
+# notebook-intelligence upgrade just makes the hunks skip.
+# ─────────────────────────────────────────────────────────────────────────────
+COPY dockered/patch_nbi_providers.py /tmp/patch_nbi_providers.py
+RUN python /tmp/patch_nbi_providers.py \
+    && rm -f /tmp/patch_nbi_providers.py
+
 RUN mkdir -p /usr/local/share/jupyter/kernels/daharness \
     && cat > /usr/local/share/jupyter/kernels/daharness/kernel.json <<'EOF'
 {

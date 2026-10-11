@@ -54,6 +54,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from daharness import ToolRegistry, OllamaEmbeddingFunction, SecretaryDeps  # noqa: E402
+from constants import brain_socket_path  # noqa: E402
 
 MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "http://localhost:55552").rstrip("/")
 
@@ -235,8 +236,8 @@ def wrap_execute(state: RunState) -> None:
 def preflight(target: str, strict: bool) -> bool:
     checks: List[Tuple[str, bool, str]] = []
 
-    sock = Path("/tmp/brain.sock")
-    checks.append(("brain socket /tmp/brain.sock", sock.is_socket(),
+    sock = Path(str(brain_socket_path()))
+    checks.append((f"brain socket {sock}", sock.is_socket(),
                    "Brain sidecar not up"))
 
     def port_open(host, port):

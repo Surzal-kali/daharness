@@ -53,9 +53,9 @@ from http.cookiejar import Cookie as JarCookie
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from constants import framework_tool
+from constants import framework_tool, resolve_workspace_root
 
-_DEFAULT_ROOT = Path(os.getenv("WORKSPACE_ROOT", "."))
+_DEFAULT_ROOT = resolve_workspace_root()
 _TTL_HOURS = float(os.getenv("COOKIE_JAR_TTL_HOURS", "72"))
 
 
@@ -63,7 +63,7 @@ def _db_path() -> Path:
     override = (os.getenv("COOKIE_JAR_DB") or "").strip()
     if override:
         return Path(override).expanduser()
-    return Path(os.getenv("WORKSPACE_ROOT", ".")) / "cookie_jar.db"
+    return resolve_workspace_root() / "cookie_jar.db"
 
 
 def _host_of(url_or_host: str) -> str:
@@ -307,7 +307,7 @@ class CookieJarStore:
         import logging
         log = logging.getLogger(__name__)
         db_p = self.db_path
-        workspace_root = Path(os.getenv("WORKSPACE_ROOT", ".")).resolve()
+        workspace_root = resolve_workspace_root()
 
         try:
             ws_stat = workspace_root.stat()

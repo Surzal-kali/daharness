@@ -124,7 +124,10 @@ def test_get_armed_scan_config_resolves_state(monkeypatch, tmp_path):
 def test_get_armed_scan_config_none_when_disarmed(monkeypatch, tmp_path):
     from auxiliaries import program_scope as ps
 
-    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "missing"))
+    # An EXISTING but empty root: nothing armed there. (A missing dir would
+    # now fall back to the code checkout via constants.resolve_workspace_root
+    # — a lane-safety rule, not a disarm signal.)
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
     assert ps.get_armed_scan_config() is None
 
 

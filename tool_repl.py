@@ -50,7 +50,7 @@ try:
 except ImportError:
     pass
 
-from constants import TransportType
+from constants import TransportType, brain_socket_path
 from daharness.models import ToolManifest
 from daharness.registry import ToolRegistry
 
@@ -1316,7 +1316,7 @@ def _bottom_toolbar(shell):
 
     # ── Brain socket status ────────────────────────────────────────────
     try:
-        sock = Path("/tmp/brain.sock")
+        sock = Path(brain_socket_path())
         if sock.exists():
             parts.append(("class:toolbar.brain", " brain:✓ "))
         else:
@@ -2450,13 +2450,14 @@ def print_result(result: Dict[str, Any]):
 # ── Shared sessions (REPL ↔ Brain) ────────────────────────────────────
 # utils/session_manager.SessionManager is a PROCESS-LOCAL singleton: whichever
 # process actually executes ssh_connect / open_listener holds the live object.
-# The Brain sidecar (/tmp/brain.sock) is the shared owner — the agent's Bridge
-# dispatches through that same socket — so a session opened ON the Brain is
-# usable by BOTH lanes. msf: handles are daemon-backed (msfrpcd) and were
-# always cross-process visible. The `sessions` command shows both worlds side
-# by side so you always know which process holds what.
+# The Brain sidecar (run/brain.sock — shared into container lanes by the
+# tree's bind mount) is the shared owner — the agent's Bridge dispatches
+# through that same socket — so a session opened ON the Brain is usable by
+# BOTH lanes. msf: handles are daemon-backed (msfrpcd) and were always
+# cross-process visible. The `sessions` command shows both worlds side by
+# side so you always know which process holds what.
 
-BRAIN_SOCKET = "/tmp/brain.sock"
+BRAIN_SOCKET = str(brain_socket_path())
 _BRAIN_TIMEOUT = 60.0
 
 
@@ -3424,6 +3425,24 @@ def _launch_kernel(kernel_argv: Optional[List[str]] = None) -> None:
     _KERNEL_NAMESPACE = build_ipython_namespace(manifests)
     tool_count = sum(1 for v in _KERNEL_NAMESPACE.values()
                      if callable(v) and hasattr(v, "__manifest__"))
+
+    # Loud tripwire: a 0-tool kernel is a resolution failure (the scan
+    # silently skips tool roots that don't exist), not an empty framework.
+    # Without this the kernel boots fine and every cell dies with NameError.
+    if tool_count == 0:
+        from daharness.registry import ALLOWED_TOOL_ROOTS, WORKSPACE_ROOT as _root
+        missing = [str(p) for p in ALLOWED_TOOL_ROOTS if not p.exists()]
+        print(
+            "  ERROR: 0 tools discovered — the tool scan found nothing.\n"
+            f"    workspace root resolved to: {_root}\n"
+            f"    tool roots missing: {missing or 'none (scan found files but minted no tools)'}\n"
+            "    Hint: a WORKSPACE_ROOT pinned to a path that doesn't exist in\n"
+            "    this lane (e.g. the HOST path from the shared .env inside a\n"
+            "    bind-mounted container) empties discovery. The resolver falls\n"
+            "    back to the code checkout, so this usually means the tree is\n"
+            "    missing or the scan is broken — inspect the roots above.",
+            flush=True,
+        )
 
     # Root-spawned kernel: sudo points HOME at /root, so the connection
     # file would land where desktop-user IDEs can't even traverse. Redirect
