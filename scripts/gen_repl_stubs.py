@@ -191,6 +191,18 @@ def generate_pyi(alias_map: Dict[str, Any]) -> str:
     body.append("sha256 = hashlib.sha256  # type: ignore[assignment]")
     body.append("md5 = hashlib.md5  # type: ignore[assignment]")
 
+    # ── Envelope helpers (deep-search tool results in the REPL) ─────────
+    body.append("")
+    body.append("# ── Envelope helpers (find/pluck/grep/keys on tool results) ────────")
+    body.append("from typing import List, Tuple, Any as _Any")
+    body.append("def find(envelope: _Any, key: str, value: _Any = ...) -> List[_Any]: ...")
+    body.append("def pluck(envelope: _Any, key: str) -> List[_Any]: ...")
+    body.append("def grep(envelope: _Any, pattern: str, ignore_case: bool = True) -> List[Tuple[str, str]]: ...")
+    body.append("def keys(envelope: _Any) -> List[str]: ...")
+    body.append("def scratch(scratch_ref: str, *, filter: str = \"\", regex: str = \"\",")
+    body.append("            fields: str = \"\", offset: int = 0, limit: int = 0,")
+    body.append("            context: int = 0) -> dict: ...")
+
     return "\n".join(header) + "\n" + "\n".join(body) + "\n"
 
 
@@ -200,27 +212,33 @@ def build_shim(aliases) -> str:
     n = len(aliases)
     # Stdlib bare-function names injected by build_ipython_namespace.
     stdlib_bares = sorted(tool_repl._STDLIB_BARES)
+    # Envelope helper names injected by build_ipython_namespace.
+    envelope_helpers = ["find", "grep", "keys", "pluck", "scratch"]
     tool_body = "\n".join("    " + repr(a) + "," for a in sorted(aliases))
     stdlib_body = "\n".join("    " + repr(a) + "," for a in stdlib_bares)
-    total = len(aliases) + len(stdlib_bares)
-    return f'''"""PEP 562 shim — runtime-resolved framework tool aliases + stdlib bares.
+    envelope_body = "\n".join("    " + repr(a) + "," for a in envelope_helpers)
+    total = len(aliases) + len(stdlib_bares) + len(envelope_helpers)
+    return f'''"""PEP 562 shim — runtime-resolved framework tool aliases + stdlib bares + envelope helpers.
 
 {_HEADER_STAMP}
-Generated: {now} | Tools: {n} | Stdlib bares: {len(stdlib_bares)} | Total: {total}
+Generated: {now} | Tools: {n} | Stdlib bares: {len(stdlib_bares)} | Envelope helpers: {len(envelope_helpers)} | Total: {total}
 
 Inside the framework REPL (tool_repl.py → the ``ipython`` command), the shell
 injects one async wrapper per discovered tool directly into ``user_ns``, plus
 a set of pre-imported stdlib modules and bare functions (``sleep``, ``b64decode``,
-``sha256``, etc.).  This shim surfaces those live objects to plain imports:
+``sha256``, etc.), plus envelope helpers (``find``, ``pluck``, ``grep``, ``keys``,
+``scratch``) for deep-searching tool results.  This shim surfaces those live
+objects to plain imports:
 
     from framework_tools import *   # inside the REPL: binds the live wrappers
 
-``__all__`` covers every tool alias and stdlib bare name the REPL registers.
-Star-import getattr's each ``__all__`` entry, which triggers ``__getattr__``,
-which pulls the name from the live shell (``get_ipython`` is a builtin inside
-IPython).  The aliases ALREADY exist in user_ns — this shim costs nothing at
-REPL time and exists for the header import in scratch cells.  Outside a live
-shell attribute access raises a descriptive AttributeError (never a silent None).
+``__all__`` covers every tool alias, stdlib bare, and envelope helper the REPL
+registers.  Star-import getattr's each ``__all__`` entry, which triggers
+``__getattr__``, which pulls the name from the live shell (``get_ipython`` is a
+builtin inside IPython).  The aliases ALREADY exist in user_ns — this shim
+costs nothing at REPL time and exists for the header import in scratch cells.
+Outside a live shell attribute access raises a descriptive AttributeError
+(never a silent None).
 """
 
 import builtins
@@ -231,6 +249,8 @@ __all__ = [
 {tool_body}
     # ── Stdlib bare functions ──────────────────────────────────────────
 {stdlib_body}
+    # ── Envelope helpers ──────────────────────────────────────────────
+{envelope_body}
 ]
 
 
@@ -264,6 +284,7 @@ def main() -> int:
     alias_map = tool_repl.build_tool_aliases(manifests)
     aliases = sorted(alias_map)
     stdlib_bare_count = len(tool_repl._STDLIB_BARES)
+    envelope_count = 5  # find, pluck, grep, keys, scratch
 
     pyi_text = generate_pyi(alias_map)
     shim_text = build_shim(aliases)
@@ -276,14 +297,14 @@ def main() -> int:
             and PY_FILE.read_text() == shim_text
         )
         state = "OK" if existing_ok else "STALE"
-        print(f"  {state}  {len(aliases)} tools + {stdlib_bare_count} stdlib bares, {PYI_FILE}")
+        print(f"  {state}  {len(aliases)} tools + {stdlib_bare_count} stdlib bares + {envelope_count} envelope helpers, {PYI_FILE}")
         return 0 if existing_ok else 1
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     PY_FILE.write_text(shim_text)
     PYI_FILE.write_text(pyi_text)
-    total = len(aliases) + stdlib_bare_count
-    print(f"  Wrote {PYI_FILE} ({len(aliases)} tools + {stdlib_bare_count} stdlib bares)")
+    total = len(aliases) + stdlib_bare_count + envelope_count
+    print(f"  Wrote {PYI_FILE} ({len(aliases)} tools + {stdlib_bare_count} stdlib bares + {envelope_count} envelope helpers)")
     print(f"  Wrote {PY_FILE} (PEP 562 shim, __all__ = {total} entries)")
     print(f"  nvim pyright extraPaths → {OUT_DIR}")
     return 0
