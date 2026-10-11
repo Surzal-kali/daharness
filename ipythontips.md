@@ -289,7 +289,7 @@ While an engagement is live, you'll want a small set of aliases in muscle memory
 - listeners: `await open_listener(host="0.0.0.0", port=4444)`, `await read_listener(handle="listener:...")`, `await send_to_listener(handle="...", data="id\n")` — reverse shell drive loop
 - OOB collab: `await collab_start()`, `await collab_generate()`, `await collab_poll(since=...)` — blind SSRF/XSS callback catching
 - findings: `await report_finding(title=..., severity="P2", asset=...)` (terminal chain action), `await render_findings()` (mid-session review)
-- memory: `await remember_text(text="root pw is toor")`, `await recall_text(query="ftp credentials")` — cross-session persistence
+- memory: `await remember_text(text="root pw is toor")`, `await recall_text(query="ftp credentials")`, `await recall_text(query="recon", target="10.0.0.5", since_hours=24)` — cross-session persistence with recency-weighted ranking
 - zombie control: `await list_tool_executions()`, `await kill_tool_execution(exec_id=...)` — Brain wedged? find and kill
 - session hygiene: `sessions()` after any lane switcheroo
 
@@ -544,7 +544,7 @@ NOTE (sandbox copy caveat): modules whose import chain needs `listeners/plugins/
 | `close_finding` | `utils.findings.close_finding` | *finding_id, *status, reason, closed_by, duplicate_of |
 | `supersede_finding` | `utils.findings.supersede_finding` | *old_id, *new_id, reason, closed_by |
 | `remember_text` | `utils.memory_tools.remember_text` | *text, namespace, memory_id, agent_id, important |
-| `recall_text` | `utils.memory_tools.recall_text` | *query, namespace, limit, agent_id |
+| `recall_text` | `utils.memory_tools.recall_text` | *query, namespace, limit, agent_id, target, since_hours |
 | `list_text_namespaces` | `utils.memory_tools.list_text_namespaces` |  |
 
 
