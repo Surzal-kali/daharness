@@ -106,21 +106,6 @@ def remember_text(text: str, namespace: str = "engagement", memory_id: str = "",
     if not memory_id:
         memory_id = f"mem-{int(time.time())}-{uuid4().hex[:6]}"
     now = time.time()
-    # ── Transient noise guard ───────────────────────────────────────────
-    # Low-value single-line entries (e.g. individual fuzz anomalies with no
-    # host context) pollute the vector store and crowd out real findings in
-    # recall.  Reject the obvious patterns before they're embedded.
-    _text_stripped = text.strip()
-    if len(_text_stripped) < 15:
-        return (
-            f"Rejected (too short for permanent memory — "
-            f"store consolidated findings, not one-liners): {text[:80]}"
-        )
-    if _text_stripped.lower().startswith("fuzz anomaly on") and "status=" in _text_stripped.lower():
-        return (
-            f"Rejected (transient fuzz anomaly — aggregate these into a "
-            f"finding via report_finding instead): {text[:80]}"
-        )
     embedding = _embed(text)
     _svc.remember(
         namespace=namespace,

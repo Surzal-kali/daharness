@@ -429,6 +429,33 @@ Launch: `python tool_repl.py` (interactive). One-shot modes:
 `run <tool_id> --json '{...}'`, or bare `run <tool_id>` = safe defaults),
 `info <tool_id>`, `sweep`, `search <query>`.
 
+Jupyter kernel lane — the notebook/engagement-journal twin of the
+interactive REPL: run `python tool_repl.py --install-kernelspec` once and
+every Jupyter-aware frontend (JupyterLab, VS Code, PyCharm) lists the
+`daharness` kernel in its kernel picker; notebook cells then run on the
+same preloaded namespace (`await session_post(...)`, `tools`,
+`scope_on()`, envelope helpers) against the live Brain session. For a
+detached one-off kernel, `python tool_repl.py --kernel` prints the
+connection file for `jupyter console --existing <file>`; in a terminal it
+exits on Ctrl-C pressed twice within 3s (a single press while a sync cell
+runs interrupts it, exactly like IPython). When the REPL runs
+as root, spawned artifacts are redirected into the desktop user's jupyter
+directories and chowned to them — resolved from `SUDO_UID` or the checkout
+owner, override with `DAHARNESS_KERNEL_OWNER` — so IDEs running as that
+user attach without permission hops. The kernelspec declares
+`interrupt_mode: message`: IDE interrupt buttons never fight the terminal
+signal, sync cells abort with KeyboardInterrupt, and any tool subprocess a
+cell spawned gets the signal via the kernel's process group. Caveat:
+Python 3.14 kernels cannot abort an in-flight `await` mid-call (upstream
+ipykernel behavior, verified against vanilla kernels) — for long-running
+tools lean on the per-tool `*_status`/`*_cancel` jobs and timeout knobs.
+The `.ipynb`
+itself is plain nbformat JSON, so journals open anywhere — but keep
+frontends **local**: cells execute against live targets and tool output
+must not egress to third parties. The kernel lane is a sibling, not a
+replacement: the terminal REPL keeps its prompt_toolkit sugar (Ollama
+ghost text, bottom toolbar, F2 editor) that has no ZMQ equivalent.
+
 Interactive commands:
 
     list [filter]        print discovered tool manifests (substring filter)

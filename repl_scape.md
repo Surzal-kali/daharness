@@ -44,6 +44,9 @@ This is the model's freebie guard against sending incomplete calls.
   cursor context; model sees framework tool names/signatures (alias catalog injected into its
   system prompt). Cursor marker `\n<CURSOR>\n`; context window = 4000 chars before / 500 after
   the cursor; debounce 400ms; min prefix 3 chars.
+- This IPython path uses Ollama's chat endpoint with a cursor marker, not native FIM. The
+  native-FIM Codestral candidate is documented for the nvim/Minuet lane; changing
+  `OLLAMA_COMPLETION_MODEL` does not turn this path into a prefix/suffix completion request.
 - Knobs (`OLLAMA_COMPLETION_*` env): ENABLED(1), MODEL(falls back to Ollama default),
   TIMEOUT_MS(6000), NUM_PREDICT(400), NUM_CTX(4096), KEEP_ALIVE(5m), TRIGGER_KEY(c-x c-o),
   DEBOUNCE_MS(400). Failure behavior: 5 consecutive failures → suggester goes quiet 15s

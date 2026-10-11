@@ -75,39 +75,6 @@ services:
       - ./chroma-config.yaml:/config.yaml:ro
     restart: unless-stopped
 
-  open-terminal:
-    build:
-      context: ..
-      dockerfile: dockered/open-terminal.Dockerfile
-    ports:
-      - "8000:8000" # Open Terminal API (connect Open WebUI here)
-      - "6000:6000" # Framework REST + MCP gateway (debug from host)
-    networks:
-      workbench:
-        ipv4_address: 172.28.0.20
-    env_file:
-      - .env
-    environment:
-      - OPEN_TERMINAL_API_KEY=${OPEN_TERMINAL_API_KEY}
-      - GATEWAY_API_KEY=${GATEWAY_API_KEY}
-      # Chroma is reached on the compose network by service name + internal
-      # port (container listens on 8000; 9000 is only the host-published map).
-      - CHROMA_HOST=chroma
-      - CHROMA_PORT=8000
-      # Ollama lives on the Windows lab host (10.10.10.128); /v1 = OpenAI-compat
-      - OLLAMA_BASE_URL=http://192.168.56.1:11434/v1
-      # Point Open WebUI's file browser at the live production code bind mount
-      # (..:/opt/framework) instead of the default `home` (/home/user). The
-      # default root seeds the named volume with the open-terminal package's
-      # home dir, so Open WebUI only ever saw the package — never the framework.
-      # /opt/framework matches WORKSPACE_ROOT in framework.env, so the browser,
-      # the terminal CWD, and the framework all agree on one workspace root.
-      - OPEN_TERMINAL_FILE_BROWSER_ROOT=/opt/framework
-    volumes:
-      - terminal-workspace:/home/user # agent workspace (ephemeral files)
-      - /home/kali/github/stuff:/opt/framework # live production code (bind mount, replaces COPY)
-    restart: unless-stopped
-
   # ─────────────────────────────────────────────────────────────────────────
   # Open WebUI — chat front end layered over the framework.
   # Reaches open-terminal at open-terminal:8000 (tools) and Ollama directly at
@@ -153,10 +120,49 @@ services:
     memswap_limit: 4g
     restart: unless-stopped
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # JupyterLab — notebook/code-execution workbench.
+  #
+  # This is intentionally a separate lane from open-terminal. The live
+  # framework tree is mounted so the daharness kernelspec and gateway wiring
+  # can be configured manually while experimenting with Open WebUI's code
+  # execution integration.
+  # ─────────────────────────────────────────────────────────────────────────
+  jupyter:
+    build:
+      context: ..
+      dockerfile: dockered/jupyter.Dockerfile
+    ports:
+      - "8888:8888"
+    networks:
+      workbench:
+        ipv4_address: 172.28.0.40
+      # Second adapter for general egress (pip installs, extension-registry
+      # queries). The workbench bridge stays the framework lane; this one
+      # gives the notebook service normal NAT'd outbound access. Attached
+      # after workbench, so it wins the default route — 172.28.0.0/24 still
+      # routes via the workbench interface for framework traffic.
+      egress:
+    volumes:
+      - jupyter-workspace:/home/jovyan/work
+      - /home/kali/github/stuff:/home/jovyan/framework
+    environment:
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN}
+      - FRAMEWORK_GATEWAY_URL=http://open-terminal:6000
+      - JUPYTER_MAPPINGKERNELMANAGER_DEFAULT_KERNEL_NAME=daharness
+    command:
+      - start-notebook.py
+      - --ServerApp.ip=0.0.0.0
+      - --ServerApp.allow_root=False
+      - --ServerApp.token=${JUPYTER_TOKEN}
+      - --ServerApp.root_dir=/home/jovyan/work
+      - --MappingKernelManager.default_kernel_name=daharness
+    restart: unless-stopped
+
 
 volumes:
-  terminal-workspace:
   open-webui-data:
+  jupyter-workspace:
 
 
 networks:
@@ -165,3 +171,5 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/24
+  egress:
+    driver: bridge

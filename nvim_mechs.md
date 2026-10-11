@@ -47,17 +47,17 @@ With it: window pops after `(`/`,` and re-shows on insert-mode entry.
 
 - Sole inline completion provider = minuet-ai via openai_fim_compatible → Ollama at
   http://192.168.56.1:11434/v1/completions (VBox host-only gateway → native Windows Ollama).
-- Model: OLLAMA_MODEL env override, fallback qwen2.5-coder:32b. FIM ruling stands: 32b or
-  bust for hand-rolled exploit work — small-model FIM on exploit cells is the wrong side to
-  economize.
+- Model: OLLAMA_MODEL env override, fallback codestral:22b. Codestral is the preferred
+  native-FIM candidate for hand-rolled exploit work; keep qwen2.5-coder:32b as the fallback
+  comparison model until the local manifest and prompt tests confirm the switch.
 - blink sources: lsp/path/snippets/buffer + minuet (async, timeout_ms 3000, score_offset 50);
   copilot removed from blink sources AND blink-copilot plugin disabled; copilot.lua keeps
   copilot solely as the CopilotChat.nvim chat backend (suggestion/panel disabled).
 - Request knobs: context_window 512, max_tokens 96, top_p 0.9, debounce 600, request_timeout 3.
 - `<A-y>` = minuet make_blink_map — manually trigger/accept an AI completion.
-- Co-residency: 32b FIM and the operator model time-share VRAM; while the operator model is
-  resident, minuet requests queue behind it (see repl_surface.md FIM section). blink's LOCAL
-  sources (lsp/stubs/path/snippets/buffer) never touch VRAM — always instant.
+- Co-residency: the 22b FIM model and the operator model time-share VRAM; while the operator
+  model is resident, minuet requests queue behind it (see repl_surface.md FIM section).
+  blink's LOCAL sources (lsp/stubs/path/snippets/buffer) never touch VRAM — always instant.
 
 ## Navigation (autocmds.lua)
 
