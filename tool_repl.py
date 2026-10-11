@@ -349,9 +349,9 @@ _TOOL_ALIASES: Dict[str, str] = {
     "listeners.execution_tracker.run_execution_tracker": "execution_tracker",
     "listeners.brain_control.run_brain_control": "brain_control",
     # utils/
-    "utils.memory_tools.remember_text": "remember",
+    "utils.memory_tools.remember_text": "remember_text",
     "utils.memory_tools.search_text": "mem_search",
-    "utils.memory_tools.recall_text": "mem_recall",
+    "utils.memory_tools.recall_text": "recall_text",
     "utils.memory_tools.get_text": "mem_get",
     "utils.memory_tools.forget_text": "mem_forget",
     "utils.session_manager.list_sessions": "list_sessions",
