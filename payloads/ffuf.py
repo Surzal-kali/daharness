@@ -16,7 +16,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from constants import framework_tool
-from utils.background_job import launch_job, poll_job, terminate_job
+from utils.background_job import launch_job, poll_job, terminate_job, register_verdict_parser
 from utils.wordlists import resolve_default_wordlist, resolve_wordlist
 
 
@@ -319,6 +319,9 @@ def _parse_ffuf_verdict(log_text: str) -> Dict[str, Any]:
     capped = _cap_findings(findings)
     capped["meta"] = meta
     return capped
+
+
+register_verdict_parser("ffuf", _parse_ffuf_verdict)
 
 
 @framework_tool(

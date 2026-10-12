@@ -39,6 +39,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from constants import framework_tool
+from utils.background_job import register_verdict_parser
 
 
 # In-process job registry. One entry per live or recently-finished scan so the
@@ -93,6 +94,9 @@ def _parse_verdict(log_text: str) -> Dict[str, Any]:
             verdict = mm.group(0).strip()
             break
     return {"injectable": injectable, "dbms": dbms, "verdict": verdict}
+
+
+register_verdict_parser("sqlmap", _parse_verdict)
 
 
 @framework_tool(
@@ -189,6 +193,7 @@ def run_sqlmap(target_url: str, options: str = "") -> Dict[str, Any]:
             _json.dump(
                 {
                     "job_id": job_id,
+                    "tool": "sqlmap",
                     "target": target_url,
                     "options": options,
                     "log_file": log_path,

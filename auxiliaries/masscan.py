@@ -49,7 +49,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from constants import framework_tool
-from utils.background_job import launch_job, poll_job, terminate_job
+from utils.background_job import launch_job, poll_job, terminate_job, register_verdict_parser
 
 
 # --- operational-plumbing denylist -------------------------------------------
@@ -333,6 +333,28 @@ def _parse_masscan_verdict(out_path: str):
             "meta": {"source": "json", "truncated": False, "note": "no output yet"},
         }
     return _parser
+
+
+# Fallback parser for reconstructed jobs (closure is gone): try to find
+# the JSON output file from the log text, parse it, or return a minimal
+# verdict.  The live closure (set at launch time) is preferred via the
+# in-process _JOBS entry; this only runs after a restart/reconstruction.
+def _masscan_fallback_verdict(log_text: str) -> Dict[str, Any]:
+    import re as _re
+    m = _re.search(r"-oJ\s+(\S+\.json)", log_text)
+    if m:
+        parsed = _parse_masscan_json(m.group(1))
+        if parsed:
+            return parsed
+    return {
+        "hosts": [],
+        "open_port_count": 0,
+        "hosts_with_open": 0,
+        "meta": {"source": "json", "truncated": False, "note": "output file not found after reconstruction"},
+    }
+
+
+register_verdict_parser("masscan", _masscan_fallback_verdict)
 
 
 # --- tool surface -----------------------------------------------------------

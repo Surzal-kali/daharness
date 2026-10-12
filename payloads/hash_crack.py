@@ -64,7 +64,7 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from constants import framework_tool
-from utils.background_job import get_job, launch_job, poll_job
+from utils.background_job import get_job, launch_job, poll_job, register_verdict_parser
 
 _JOHN_CANDIDATES = ("/usr/sbin/john", "/usr/bin/john", "/usr/local/bin/john")
 _HASHCAT_CANDIDATES = (
@@ -333,6 +333,9 @@ def _parse_john(log_text: str) -> Dict[str, Any]:
     return {"cracked_candidates": candidates[:50], "summary": summary}
 
 
+register_verdict_parser("john", _parse_john)
+
+
 @framework_tool(
     "Launch a john the Ripper crack in the background: accepts one or more "
     "hashes (newline/comma/semicolon separated), an optional wordlist "
@@ -494,6 +497,9 @@ def _parse_hashcat(log_text: str) -> Dict[str, Any]:
         if recovered
         else None,
     }
+
+
+register_verdict_parser("hashcat", _parse_hashcat)
 
 
 @framework_tool(

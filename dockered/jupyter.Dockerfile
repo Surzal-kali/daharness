@@ -62,7 +62,10 @@ RUN mkdir -p /usr/local/share/jupyter/kernels/daharness \
   ],
   "display_name": "daharness (framework tools)",
   "language": "python",
-  "interrupt_mode": "message"
+  "interrupt_mode": "message",
+  "metadata": {
+    "debugger": true
+  }
 }
 EOF
 

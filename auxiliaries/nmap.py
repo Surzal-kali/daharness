@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from constants import framework_tool
-from utils.background_job import launch_job, poll_job
+from utils.background_job import launch_job, poll_job, register_verdict_parser
 
 
 def _parse_nmap_verdict(log_text: str) -> Dict[str, Any]:
@@ -68,6 +68,9 @@ def _parse_nmap_verdict(log_text: str) -> Dict[str, Any]:
         "open_ports": open_ports,
         "host_state": host_state,
     }
+
+
+register_verdict_parser("nmap", _parse_nmap_verdict)
 
 
 def _nmap_target_argv(target: str) -> List[str]:

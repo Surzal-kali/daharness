@@ -626,6 +626,49 @@ _STDLIB_BARES: Dict[str, Any] = {
 }
 
 
+# ── IPython.display wrapper classes (bare-name injection) ────────────────────
+#
+# ``display()`` itself is deliberately absent: IPython's ``init_displayhook()``
+# (interactiveshell.py ~896) injects it into ``builtins`` in every shell,
+# including the ZMQ kernel — so it never needed us.  These four wrapper classes
+# (``Markdown``, ``HTML``, ``JSON``, ``Image``) are injected as bare names so
+# cells can do ``Markdown("## heading")`` / ``HTML(table_str)`` / ``Javascript(js)``
+# with zero imports.  Loaded lazily so headless modes (``run`` / ``oneshot`` / ``search``)
+# that never build the IPython namespace pay nothing.
+_DISPLAY_CLASSES: Dict[str, Any] | None = None
+
+
+def _load_display_classes() -> Dict[str, Any]:
+    """Lazy IPython.display wrapper classes for bare-name injection.
+
+    Returns a dict of ``{name: class}`` for ``Markdown``, ``HTML``, ``JSON``,
+    ``Image``, ``Javascript``, and ``DisplayHandle``.  ``display()`` is not
+    included — it's a builtin in every IPython shell already.
+
+    ``DisplayHandle`` enables stateful, in-place output updates:
+    ``h = display(obj, display_id=True); h.update(new_obj)``.  In the ZMQ
+    kernel lane (JupyterLab / VS Code) the frontend replaces the previous
+    output in-place via the ``display_id`` protocol — ideal for live progress
+    tables during long tool runs.  In the terminal lane (InteractiveShellEmbed)
+    it degrades gracefully to a second print below the first — harmless, just
+    not in-place.  The terminal can't do in-place updates (scrolling buffer),
+    so this is the honest fallback rather than a fake no-op.
+    """
+    global _DISPLAY_CLASSES
+    if _DISPLAY_CLASSES is None:
+        from IPython.display import DisplayHandle, HTML, Image, JSON, Javascript, Markdown
+
+        _DISPLAY_CLASSES = {
+            "Markdown": Markdown,
+            "HTML": HTML,
+            "JSON": JSON,
+            "Image": Image,
+            "Javascript": Javascript,
+            "DisplayHandle": DisplayHandle,
+        }
+    return _DISPLAY_CLASSES
+
+
 # ── Envelope helpers: find / pluck / grep on large tool results ──────────────
 #
 # Tool results in the REPL are plain dicts sitting in variables (``r``, ``out``,
@@ -869,6 +912,7 @@ def build_ipython_namespace(
     #    on any name collision — unlikely but deterministic) ────────────
     ns.update(_STDLIB_MODULES)
     ns.update(_STDLIB_BARES)
+    ns.update(_load_display_classes())
 
     # ── Envelope helpers (deep-search / extract from tool results) ─────
     ns["find"] = find
@@ -3060,6 +3104,12 @@ async def repl_loop(manifests: List[ToolManifest]):
                 print("    Bares:   sleep(30), b64decode(...), b64encode(...), pp(obj),")
                 print("             sha256(data), md5(data), urlsplit(...), quote(...), unquote(...)")
                 print()
+                print("  ── Display (bare names, no import needed) ──")
+                print("    Markdown('## heading')  HTML(table_str)  JSON(obj)  Image(path)")
+                print("    DisplayHandle: h = display(obj, display_id=True)")
+                print("                   h.update(new_obj)  → in-place in JupyterLab,")
+                print("                                      re-print in terminal")
+                print()
                 print("  ── Envelope helpers (deep-search tool results) ──")
                 print("    find(r, 'open_ports')        → all values at that key, any depth")
                 print("    find(r, 'port', value=80)     → matches with path context")
@@ -3550,6 +3600,16 @@ def _install_kernelspec() -> None:
         # spawned by a cell get interrupted too, and the signal never
         # collides with the terminal double-Ctrl-C exit on tty launches.
         "interrupt_mode": "message",
+        # Advertise DAP debugger support so JupyterLab shows the debugger
+        # panel + toggle. ipykernel backs this with debugpy (in
+        # requirements.txt); without this key the frontend hides all
+        # debugger UI even though the kernel is perfectly capable.
+        # Must be nested under "metadata" — JupyterLab reads
+        # metadata.debugger, not a top-level key (matches the stock
+        # ipykernel kernelspec schema).
+        "metadata": {
+            "debugger": True,
+        },
     }
     ksm = KernelSpecManager()
     kdir = Path(ksm.user_kernel_dir) / "daharness"

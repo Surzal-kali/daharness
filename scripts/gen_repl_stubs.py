@@ -151,6 +151,7 @@ def generate_pyi(alias_map: Dict[str, Any]) -> str:
         "import traceback",
         "import struct",
         "import urllib.parse",
+        "from IPython.display import HTML, Image, Javascript, JSON, Markdown",
         "",
     ]
 
@@ -191,6 +192,15 @@ def generate_pyi(alias_map: Dict[str, Any]) -> str:
     body.append("sha256 = hashlib.sha256  # type: ignore[assignment]")
     body.append("md5 = hashlib.md5  # type: ignore[assignment]")
 
+    # ── IPython.display wrapper classes (injected as bare names) ────────
+    body.append("")
+    body.append("# ── IPython.display wrapper classes (bare names in the REPL/kernel) ───")
+    body.append("Markdown = Markdown  # type: ignore[assignment]")
+    body.append("HTML = HTML  # type: ignore[assignment]")
+    body.append("JSON = JSON  # type: ignore[assignment]")
+    body.append("Image = Image  # type: ignore[assignment]")
+    body.append("Javascript = Javascript  # type: ignore[assignment]")
+
     # ── Envelope helpers (deep-search tool results in the REPL) ─────────
     body.append("")
     body.append("# ── Envelope helpers (find/pluck/grep/keys on tool results) ────────")
@@ -210,8 +220,11 @@ def build_shim(aliases) -> str:
     """Return the framework_tools.py shim text (PEP 562)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     n = len(aliases)
-    # Stdlib bare-function names injected by build_ipython_namespace.
-    stdlib_bares = sorted(tool_repl._STDLIB_BARES)
+    # Stdlib bare-function names + IPython.display wrapper classes injected
+    # by build_ipython_namespace.  Display classes are merged in so the shim's
+    # __all__ matches the live namespace exactly.
+    bares = {**tool_repl._STDLIB_BARES, **tool_repl._load_display_classes()}
+    stdlib_bares = sorted(bares)
     # Envelope helper names injected by build_ipython_namespace.
     envelope_helpers = ["find", "grep", "keys", "pluck", "scratch"]
     tool_body = "\n".join("    " + repr(a) + "," for a in sorted(aliases))
@@ -283,7 +296,7 @@ def main() -> int:
     manifests = tool_repl.discover_tools()
     alias_map = tool_repl.build_tool_aliases(manifests)
     aliases = sorted(alias_map)
-    stdlib_bare_count = len(tool_repl._STDLIB_BARES)
+    stdlib_bare_count = len(tool_repl._STDLIB_BARES) + len(tool_repl._load_display_classes())
     envelope_count = 5  # find, pluck, grep, keys, scratch
 
     pyi_text = generate_pyi(alias_map)

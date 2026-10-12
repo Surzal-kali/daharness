@@ -29,7 +29,7 @@ import re
 from typing import Any, Dict, List
 
 from constants import framework_tool
-from utils.background_job import launch_job, poll_job, terminate_job
+from utils.background_job import launch_job, poll_job, terminate_job, register_verdict_parser
 from utils.wordlists import resolve_default_wordlist
 
 
@@ -101,6 +101,9 @@ def _parse_hydra_verdict(log_text: str) -> Dict[str, Any]:
         "attempts": attempts,
         "status_line": status_line,
     }
+
+
+register_verdict_parser("hydra", _parse_hydra_verdict)
 
 
 _HYDRA_CRED_FLAGS = {"-l", "-L", "-p", "-P", "-C", "-x"}

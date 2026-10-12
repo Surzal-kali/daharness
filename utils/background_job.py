@@ -51,6 +51,60 @@ _JOBS_LOCK = threading.Lock()
 # Default log directory for per-job output.
 _LOG_DIR = os.getenv("BG_JOB_LOG_DIR", "/tmp")
 
+# Verdict-parser registry.  Each tool module registers its log-text parser
+# here at import time so the generic ``job_status`` tool can apply the right
+# parser even when the job isn't in this process's ``_JOBS`` (e.g. after a
+# Brain restart or from a different lane).  Keyed by ``tool_name`` — the
+# same value passed to ``launch_job(..., tool_name=...)`` and stored in the
+# disk sidecar's ``"tool"`` field.
+_VERDICT_PARSERS: "Dict[str, Callable[[str], Dict[str, Any]]]" = {}
+_VERDICT_PARSERS_LOCK = threading.Lock()
+
+
+def register_verdict_parser(tool_name: str, parser: Callable[[str], Dict[str, Any]]) -> None:
+    """Register a verdict parser for a tool so ``job_status`` can apply it.
+
+    Called by tool modules at import time (module-level, after the parser
+    function is defined).  The Brain's startup scan imports those modules,
+    so parsers are registered before any ``CALL_TOOL`` can arrive.
+    """
+    with _VERDICT_PARSERS_LOCK:
+        _VERDICT_PARSERS[tool_name] = parser
+
+
+def _lookup_verdict_parser(tool_name: str) -> "Optional[Callable[[str], Dict[str, Any]]]":
+    """Return the registered verdict parser for ``tool_name``, or None."""
+    with _VERDICT_PARSERS_LOCK:
+        return _VERDICT_PARSERS.get(tool_name)
+
+
+def _find_job_tool(job_id: str) -> "Optional[str]":
+    """Discover the tool name for a job by scanning the log dir for its sidecar.
+
+    The disk sidecar is named ``<tool>_<job_id>.meta`` and contains a
+    ``"tool"`` field.  We scan ``_LOG_DIR`` for any file matching
+    ``*_<job_id>.meta``, read the ``tool`` field, and return it.  This lets
+    ``job_status`` work even when the job isn't in this process's ``_JOBS``.
+    """
+    log_dir = _LOG_DIR
+    try:
+        candidates = [
+            os.path.join(log_dir, f)
+            for f in os.listdir(log_dir)
+            if f.endswith(f"_{job_id}.meta")
+        ]
+    except OSError:
+        return None
+    for meta_path in candidates:
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            if meta.get("job_id") == job_id:
+                return meta.get("tool") or meta.get("tool_name")
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
 
 def launch_job(
     command: List[str],
@@ -266,8 +320,15 @@ def poll_job(job_id: str, *, tool_name: str = "") -> Dict[str, Any]:
         "log_file": entry["log_file"],
     }
 
-    # Tool-specific verdict parsing.
+    # Tool-specific verdict parsing.  Try the entry's own parser first
+    # (the live closure set at launch time); if the entry was reconstructed
+    # from disk (no parser), fall back to the registry so the generic
+    # ``job_status`` tool still gets parsed verdicts across restarts.
     parser = entry.get("verdict_parser")
+    if not callable(parser):
+        tool = entry.get("tool", "")
+        if tool:
+            parser = _lookup_verdict_parser(tool)
     if callable(parser):
         try:
             verdict = parser(log_text)
