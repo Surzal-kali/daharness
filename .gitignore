@@ -76,3 +76,5 @@ text.txt.save
 !.vscode/settings.json
 # papermill run records - outputs-in, potentially large
 dabooks/runs/
+dabooks/damill/*
+!/dabooks/damill/README.md
