@@ -69,3 +69,5 @@ scratch-data/*
 
 # --- Jupyter auto-recovery saves (dabooks is the tracked work dir) ---
 .ipynb_checkpoints/
+dabooks/Jython.ipynb
+text.txt.save
