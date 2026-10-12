@@ -282,9 +282,17 @@ class FrameworkLoader:
             )
             self.active_tasks.append(process)
 
-            for _ in range(150):  # ~15s; the sidecar runs its startup tool scan
-                # BEFORE binding the socket, so cold imports (impacket, dotenv)
-                # can take a few seconds past process launch.
+            # The sidecar runs its startup tool scan (BRAIN_SCAN_DIRS) BEFORE
+            # binding the socket, so cold imports (impacket, scapy/packetcraft,
+            # dotenv) can take several seconds past process launch — measured
+            # ~6-8s with utils/ in the scan set on a cold cache, worse when the
+            # systemd kernel is concurrently importing the same modules. The
+            # budget is env-tunable so operators with heavy scan dirs can widen
+            # it without a code edit.
+            ready_timeout = float(os.getenv("BRAIN_READY_TIMEOUT", "30"))
+            poll_interval = 0.1
+            deadline = time.monotonic() + ready_timeout
+            while time.monotonic() < deadline:
                 if await _brain_ready():
                     logger.info("[+] Brain socket ready at %s", socket_path)
                     return process
@@ -294,10 +302,13 @@ class FrameworkLoader:
                         process.returncode, brain_log_path or "<devnull>",
                     )
                     return process
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(poll_interval)
             logger.warning(
-                "[!] Nothing listening on %s within 5s; dispatch will fall back to in-process launches",
-                socket_path,
+                "[!] Nothing listening on %s within %.0fs (BRAIN_READY_TIMEOUT); "
+                "dispatch will fall back to in-process launches. "
+                "If the startup scan is slow (utils/scapy, cold cache), raise "
+                "BRAIN_READY_TIMEOUT or trim BRAIN_SCAN_DIRS.",
+                socket_path, ready_timeout,
             )
             return process
         except Exception as e:
