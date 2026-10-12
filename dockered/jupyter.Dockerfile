@@ -17,6 +17,7 @@ RUN python -m pip install --no-cache-dir -r /tmp/framework-requirements.txt \
     && python -m pip install --no-cache-dir \
         chromadb==1.5.9 \
         pydantic-ai==2.35.0 \
+        ipywidgets papermill \
     && python -m pip install --no-cache-dir --no-deps --force-reinstall \
         mcp==1.29.0 mcp-types==2.0.0 \
     && rm -f /tmp/framework-requirements.txt

@@ -74,3 +74,5 @@ text.txt.save
 
 ### add lint options in vscode for version tracking
 !.vscode/settings.json
+# papermill run records - outputs-in, potentially large
+dabooks/runs/
