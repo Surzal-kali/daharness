@@ -1,5 +1,5 @@
 {
-    // ── Existing Chat/MCP Settings ───────────────────────────────────────────
+    // ── Model Context Protocol (MCP) Configuration ───────────────────────────
     "chat.mcp.serverSampling": {
         "stuff/.vscode/mcp.json: framework (daharness)": {
             "allowedModels": [
@@ -15,20 +15,24 @@
         }
     },
 
-    // ── Custom REPL Stub Hook-In (Pylance/Pyright) ───────────────────────────
-    
-    // Tells Pylance where to find the generated stub (.pyi) signatures
-    "python.analysis.stubPath": "/home/YOUR_USERNAME/.local/share/framework-stubs",
+    // ── Unified Python Language Server Settings ──────────────────────────────
+    "python.languageServer": "Pylance",
 
-    // Tells Pylance to include the directory for runtime resolution fallback
+    // ── Custom REPL Stub Hook-In (Pylance/Pyright Engine) ────────────────────
+    // Remapped absolute path to your framework-stubs directory
+    "python.analysis.stubPath": "/home/kali/.local/share/framework-stubs",
     "python.analysis.extraPaths": [
-        "/home/YOUR_USERNAME/.local/share/framework-stubs"
+        "/home/kali/.local/share/framework-stubs",
+        "${workspaceFolder}"
     ],
 
-    // ── Linter Optimization for Security Tool Scripts ─────────────────────────
+    // ── Complete Lint/Warning Suppression ────────────────────────────────────
     "python.analysis.diagnosticSeverityOverrides": {
-        // Keeps things quiet if your script imports * from your generated framework
+        // This is the silver bullet for your script namespace injection:
+        "reportUndefinedVariable": "none",
+        
+        // Keeps things quiet when parsing dynamic modules across your framework
         "reportMissingImports": "none",
-        "reportMissingModuleSource": "warning"
+        "reportMissingModuleSource": "none"
     }
 }
