@@ -71,3 +71,6 @@ scratch-data/*
 .ipynb_checkpoints/
 dabooks/Jython.ipynb
 text.txt.save
+
+### add lint options in vscode for version tracking
+!.vscode/settings.json

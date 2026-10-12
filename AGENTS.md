@@ -426,6 +426,34 @@ predecessor and no longer exists.)
 
 ## Development Guidelines
 
+### Jupyter Kernel (`dabooks/*.ipynb`)
+
+The Jupyter kernel used in this workspace resolves like the IPython REPL:
+the framework root is on `sys.path`, so codebase modules and
+`@framework_tool` functions resolve to their **bare tool names** with no
+explicit import and no collision risk (same namespace setup as
+`bootstrap.py`'s REPL and `tool_repl.py`). `extract_js_routes(...)` just
+works — do not add `from payloads.js_recon import extract_js_routes` style
+imports in notebook cells.
+
+Framework tools are sync in the source, but the kernel namespace injects
+**async wrappers**, not the raw functions — `_make_tool_wrapper`
+(`tool_repl.py`) wraps each tool in `async def _wrapper(**kwargs)` that
+dispatches through `run_tool`. The kernel's `ZMQInteractiveShell` enables
+autoawait, so top-level `await` works in cells. **Always `await` every
+framework tool call** in notebook cells — without `await` you get a
+coroutine object, not the result, and the tool never actually executes.
+
+Tool results come back wrapped in a **transport envelope**:
+`{"status": ..., "result": <tool's actual dict>, "_elapsed_s": N}`. The
+tool's own fields are under `result`, not at the top level. The kernel
+namespace ships envelope helpers that auto-unwrap this layer
+(`_envelope_payload`): `keys(r)` (every key at any depth), `pluck(r, K)`
+(flat list of every value for key K), `find(r, K)` (values + paths),
+`grep(r, RX)` (string search across all values). **Use these instead of
+guessing the nesting** — `pluck(r, "routes")` works regardless of whether
+the field is at the top level or nested under `result`.
+
 ### Adding a Tool
 
 **Option A — argparse module (LOCAL_FILE):**
