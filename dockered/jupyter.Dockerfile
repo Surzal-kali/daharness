@@ -9,7 +9,8 @@
 FROM quay.io/jupyter/base-notebook:latest
 
 USER root
-
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt /tmp/framework-requirements.txt
 
 RUN python -m pip install --no-cache-dir -r /tmp/framework-requirements.txt \
@@ -68,7 +69,8 @@ RUN mkdir -p /usr/local/share/jupyter/kernels/daharness \
   }
 }
 EOF
-
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
 USER ${NB_UID}
 WORKDIR /home/jovyan/work
 
