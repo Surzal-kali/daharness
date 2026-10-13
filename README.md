@@ -811,6 +811,21 @@ python bootstrap.py --daemon   # background services only (no chat loop)
 pytest tests/
 ```
 
+For a systemd-managed service, copy the template from
+[`scripts/daharness.service`](/home/kali/github/stuff/scripts/daharness.service)
+to `/etc/systemd/system/` (adjust the checkout and virtualenv paths if needed),
+then enable and start it:
+
+```bash
+sudo cp scripts/daharness.service /etc/systemd/system/daharness.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now daharness.service
+sudo journalctl -u daharness.service -f
+```
+
+Stop it with `sudo systemctl stop daharness.service`; `bootstrap.py --daemon`
+handles SIGTERM and shuts down its child services before exiting.
+
 In both modes, `bootstrap.py` starts the Brain sidecar, the ZAP daemon, the
 Metasploit MCP sidecar, and the API gateway (with MCP handlers), after a
 wordlist-tree preflight (`utils.wordlists.preflight_wordlists`) surfaces a
