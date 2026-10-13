@@ -69,12 +69,10 @@ scratch-data/*
 
 # --- Jupyter auto-recovery saves (dabooks is the tracked work dir) ---
 .ipynb_checkpoints/
-dabooks/Jython.ipynb
+dabooks/*
 text.txt.save
 
 ### add lint options in vscode for version tracking
 !.vscode/settings.json
 # papermill run records - outputs-in, potentially large
-dabooks/runs/
-dabooks/damill/*
 !/dabooks/damill/README.md

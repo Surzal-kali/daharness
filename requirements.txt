@@ -128,7 +128,7 @@ jsonschema-path==0.5.0
 jsonschema-specifications==2025.9.1
 jupyter-events==0.12.1
 jupyter-lsp==2.3.1
-jupyter-ydoc==0.2.5
+jupyter-ydoc==4.1.1
 jupyter_ai==2.31.7
 jupyter_ai_acp_client==0.3.2
 jupyter_ai_chat_commands==0.0.4
@@ -144,9 +144,8 @@ jupyter_server==2.21.1
 jupyter_server_fileid==0.9.3
 jupyter_server_mcp==0.3.0
 jupyter_server_terminals==0.5.4
-jupyter_server_ydoc==0.8.0
+jupyter_server_ydoc==3.0.4
 jupyterlab==4.7.0a2
-jupyterlab-drawio==0.9.0
 jupyterlab-execute-time==3.3.0
 jupyterlab-git-core==0.55.0
 jupyterlab-lsp==5.3.0
@@ -250,6 +249,8 @@ pybase64==1.5.0
 pycodestyle==2.12.1
 pycparser==3.0
 pycrdt==0.14.8
+pycrdt-websocket==0.16.5
+pycrdt-store==0.1.5
 pycryptodomex==3.23.0
 pydantic==2.13.4
 pydantic-ai-slim==2.35.0
@@ -352,10 +353,8 @@ whatthepatch==1.0.7
 widgetsnbextension==4.0.16
 wrapt==2.3.0
 xxhash==4.0.1
-y-py==0.6.2
 yapf==0.43.0
 yarl==1.24.5
-ypy-websocket==0.8.4
 zaproxy==0.6.0
 zict==3.0.0
 zipp==4.1.1
