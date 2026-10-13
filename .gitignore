@@ -65,14 +65,27 @@ hydra.restore
 scratch.*
 cookie_jar.db*
 scratch-data/*
-!dabooks/README.md
 
 # --- Jupyter auto-recovery saves (dabooks is the tracked work dir) ---
 .ipynb_checkpoints/
-dabooks/*
 text.txt.save
-
 ### add lint options in vscode for version tracking
 !.vscode/settings.json
-# papermill run records - outputs-in, potentially large
-!/dabooks/damill/README.md
+
+# --- dabooks whitelist: ignore everything, re-include only tracked lanes ---
+# NOTE (git semantics): when a whole DIRECTORY is ignored, later negations
+# CANNOT revive files inside it — the directory itself must be re-included
+# first. So `dabooks/*` is paired with directory negations placed BEFORE the
+# child negations (`!dabooks/primitives/**`), otherwise the whitelist is dead.
+dabooks/*
+!dabooks/README.md
+!dabooks/primitives/
+!dabooks/primitives/**
+# kernel-lane build artifacts — re-ignored AFTER the primitives negation
+# (later rules win; the negation above would otherwise revive __pycache__/)
+dabooks/primitives/__pycache__/
+# papermill staging dir: README only. Dir re-included, children re-ignored,
+# README revived — pattern works for NEW non-README files too.
+!dabooks/damill/
+dabooks/damill/*
+!dabooks/damill/README.md
