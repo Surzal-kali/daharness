@@ -44,7 +44,9 @@ framework.env
 dockered/.webui_secret_key
 
 # --- notebook-intelligence container state (encrypted GH token, per-user config) ---
-dockered/jupyter-nbi/
+dockered/jupyter-nbi/*
+!dockered/jupyter-nbi/rules/
+dockered/jupyter-nbi/rules/__pycache__/
 
 # --- local scratch ---
 WIP_*.*
