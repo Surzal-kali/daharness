@@ -698,11 +698,28 @@ Available functions: `display`, `display_html`, `display_javascript`,
 > depends on the OWUI execute_code output handler.
 ---
 
-## excluded from the registry
+### Display primitives (IPython)
 
-`memories.py` has 5 `@framework_tool`s (`remember`, `search`, `recall`,
-`get`, `forget` in `MemoryService`) but is in `skip_files` — never mints
-registry tools. Entry-point files (`bootstrap.py`, legacy `owui-tool.py`)
-are likewise skipped. `encoders/` registers nothing. C plugins
-(`listeners/plugins/raw_scan.so`) are loaded only inside decorated Python
-wrappers, not indexed directly.
+Standard IPython display classes are available in the kernel namespace.
+The correct route for JavaScript rendering is
+`display(Javascript(code))` — capital `J` class; lowercase `javascript`
+is not defined.
+
+Available classes: `HTML`, `Javascript`, `Markdown`, `Image`, `JSON`,
+`Code`, `IFrame`, `SVG`, `Latex`, `Math`, `Pretty`, `Video`, `Audio`.
+
+Available functions: `display`, `display_html`, `display_javascript`,
+`display_json`, `display_markdown`, `display_png`, `display_svg`,
+`update_display`, `clear_output`.
+
+### IPython magics in execute_code
+
+The execute_code kernel is a real IPython kernel, so **IPython line
+magics and shell escapes work inside execute_code blocks**:
+
+| magic | behavior | confirmed |
+|---|---|---|
+| `!command` | Shell escape — output to stdout | yes |
+| `!!command` | Shell escape — output captured as list | yes |
+| `%magic args` | Line magic (e.g. `%timeit`, `%who`) | yes |
+| `%%magic` | Cell magic (e.g. `%%bash`, `%%javascript`) | yes |
