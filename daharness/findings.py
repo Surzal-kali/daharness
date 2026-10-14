@@ -13,6 +13,7 @@ bug-bounty submission draft and lab documentation, all from the same data.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -24,6 +25,60 @@ from .models import Finding
 from constants import resolve_workspace_root
 
 _DEFAULT_DB = str(Path(__file__).resolve().parent.parent / "ids.db")
+
+logger = logging.getLogger(__name__)
+
+
+def ensure_ids_db(db_path: str | None = None) -> Path:
+    """Lazily create ``ids.db`` with every table owned by both
+    :class:`~daharness.findings.FindingStore` and
+    :class:`utils.sessions.DatabaseManager`.
+
+    On a fresh checkout the file does not exist and nothing instantiates the
+    two stores at boot time, so the first ``report_finding`` call (or worse,
+    a ``framework_health`` probe) is what discovers the gap.  This function
+    opens the database (creating it on first touch), runs every
+    ``CREATE TABLE IF NOT EXISTS`` + migration in one short transaction, and
+    returns the resolved path.  Idempotent — calling it on an existing DB is
+    a no-op beyond the PRAGMA checks.
+
+    Callers:
+    - :meth:`FrameworkLoader.launch_all` (bootstrap preflight, right before
+      the wordlist preflight)
+    - ``framework_health`` (so the health probe reports the DB as up instead
+      of "not found" on a fresh install)
+    """
+    path = Path(db_path) if db_path else Path(resolve_workspace_root()) / "ids.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # FindingStore handles WAL setup + ownership repair + the findings table
+    # + lifecycle migrations; its __init__ already does all of this.  We
+    # instantiate it (which creates/migrates the findings table) and then
+    # add the targets/sessions/notes tables owned by DatabaseManager.
+    store = FindingStore(str(path))
+    try:
+        conn = store.conn
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS targets
+            (id INTEGER PRIMARY KEY, ip_address TEXT, port INTEGER, status TEXT)"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS sessions
+            (id INTEGER PRIMARY KEY, target_id INTEGER, payload TEXT, status TEXT,
+             start_time DATETIME, end_time DATETIME, note TEXT,
+             FOREIGN KEY(target_id) REFERENCES targets(id))"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS notes
+            (id INTEGER PRIMARY KEY, target_id INTEGER, note TEXT,
+             FOREIGN KEY(target_id) REFERENCES targets(id))"""
+        )
+        conn.commit()
+    finally:
+        store.close()
+
+    logger.info("[db] ids.db ready at %s", path)
+    return path
 
 
 class FindingStore:

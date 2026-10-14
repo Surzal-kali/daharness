@@ -145,8 +145,14 @@ def framework_health() -> Dict[str, Any]:
         "detail": f"127.0.0.1:{zap_port}" if zap_up else f"not listening on 127.0.0.1:{zap_port}",
     }
 
-    # SQLite findings DB
-    db_exists = db_path.exists()
+    # SQLite findings DB — lazily create on a fresh checkout so the health
+    # probe reports it as up instead of "not found" on a new install.
+    try:
+        from daharness.findings import ensure_ids_db
+        ensure_ids_db(str(db_path))
+        db_exists = True
+    except Exception:
+        db_exists = False
     db_up = db_exists
     if db_exists:
         try:
@@ -159,7 +165,7 @@ def framework_health() -> Dict[str, Any]:
             subsystems["findings_db"] = {"up": False, "detail": f"exists but error: {exc}"}
     subsystems.setdefault("findings_db", {
         "up": db_up,
-        "detail": str(db_path) if db_up else f"not found at {db_path}",
+        "detail": str(db_path) if db_up else f"could not create/open {db_path}",
     })
 
     up_count = sum(1 for v in subsystems.values() if v["up"])

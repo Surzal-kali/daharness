@@ -6,6 +6,12 @@ One SQLite database file at the workspace root (`ids.db`). It is shared:
 secretary, and MCP clients is handled with busy-timeout + retry inside
 `daharness/findings.py`.
 
+**Lazy creation:** `daharness.findings.ensure_ids_db()` creates the file and
+all four tables on first call — bootstrap's `launch_all` runs it as a preflight
+(before the wordlist preflight), and `framework_health` calls it so a fresh
+checkout reports the DB as up instead of "not found". Idempotent on an existing
+database.
+
 ## targets            (utils/sessions.py)
 
 | Column     | Type    | Notes                          |

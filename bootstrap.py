@@ -22,6 +22,7 @@ if sys.version_info < MIN_PYTHON:
     sys.exit(1)
 
 from daharness import _chat, ToolRegistry, OllamaEmbeddingFunction
+from daharness.findings import ensure_ids_db
 from constants import brain_socket_path
 
 # --- .env loading (sudo-safe) ------------------------------------------------
@@ -766,6 +767,15 @@ class FrameworkLoader:
             "clear_certs": ("auxiliaries.cert_tools", "clear_certs"),
             "mcp": ("metasploiting", "start_mcp")
         })
+
+        # Lazily create ids.db (findings + targets/sessions/notes tables) on
+        # a fresh checkout so the first report_finding / framework_health
+        # probe doesn't trip over a missing database file.  Idempotent — a
+        # no-op when the file already exists.
+        try:
+            ensure_ids_db()
+        except Exception as exc:
+            logger.warning("[!] ids.db preflight raised: %s", exc, exc_info=True)
 
         # Preflight the wordlist tree BEFORE any tool can be dispatched so a
         # missing /usr/share/wordlists (or an undecompressed rockyou.txt) is

@@ -1,9 +1,13 @@
 import sqlite3
 
+from constants import resolve_workspace_root
+
+_DEFAULT_DB = str(resolve_workspace_root() / "ids.db")
+
 
 class DatabaseManager:
-    def __init__(self):
-        self.conn = sqlite3.connect('ids.db')
+    def __init__(self, db_path: str = _DEFAULT_DB):
+        self.conn = sqlite3.connect(db_path)
         self.c = self.conn.cursor()
         self._init_db()
 
