@@ -23,7 +23,7 @@ MSF_RPC_HOST = os.getenv("MSF_RPC_HOST", "127.0.0.1")
 # ssh_login / similar auxiliaries take a few seconds to connect and create
 # a session; without polling, the tool returns before the session exists
 # and the caller never learns the session ID.
-MSF_SESSION_POLL_SECONDS = float(os.getenv("MSF_SESSION_POLL_SECONDS", "30"))
+MSF_SESSION_POLL_SECONDS = float(os.getenv("MSF_SESSION_POLL_SECONDS", "60"))
 MSF_SESSION_POLL_INTERVAL = float(os.getenv("MSF_SESSION_POLL_INTERVAL", "2"))
 
 # Hard cap on how much of a module's 'module.results' output we render into
