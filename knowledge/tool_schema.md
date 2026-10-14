@@ -682,8 +682,7 @@ Standard IPython display classes are available in the kernel namespace.
 The correct route for JavaScript rendering is
 `display(Javascript(code))` — capital `J` class; lowercase `javascript`
 is not defined. The `%%javascript` cell magic works in the notebook
-frontend but not inside `execute_code` (it is a cell-level magic, not
-inline Python).
+frontend.
 
 Available classes: `HTML`, `Javascript`, `Markdown`, `Image`, `JSON`,
 `Code`, `IFrame`, `SVG`, `Latex`, `Math`, `Pretty`, `Video`, `Audio`.
