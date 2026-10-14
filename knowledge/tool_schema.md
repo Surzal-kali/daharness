@@ -156,12 +156,21 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 
 ## auxiliaries/cors_probe.py
 
+Kernel bare names: `cors` (auto-derived — strips `check_` from
+`check_cors`), `security_headers` (auto-derived — strips `check_` from
+`check_security_headers`). `cors_probe` was a stale curated alias for
+the deleted `run_cors_probe` wrapper.
+
 | tool_id | params | tags |
 |---|---|---|
 | `check_cors` | `url` (req), `insecure` (False), `timeout` (10.0) | `web.probe` |
 | `check_security_headers` | `url` (req), `insecure` (False), `timeout` (10.0) | `web.probe` |
 
 ## auxiliaries/db_client.py — DB lane
+
+No `db_client` bare name — the module exposes 5 separate tools.
+Kernel bare names: `db_connect`, `db_exec`, `db_exec_batch`,
+`db_schema_farm`, `db_close`.
 
 | tool_id | params | notes |
 |---|---|---|
@@ -172,6 +181,9 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 | `db_close` | `handle` (req) | handle `db`; teardown, ungated |
 
 ## auxiliaries/dns_lookup.py
+
+Kernel bare names: `resolve_host`, `ptr_lookup` (not `dns_lookup` —
+that was a stale curated alias for the deleted `run_dns_lookup` wrapper).
 
 | tool_id | params | tags |
 |---|---|---|
@@ -185,6 +197,11 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 | `framework_health` | none | `infra` |
 
 ## auxiliaries/ftp_recon.py
+
+No single `ftp_recon` tool — that was a stale curated alias for the
+deleted `run_ftp_recon` wrapper. The module exposes 8 separate tools.
+Kernel bare names: `ftp_banner`, `ftp_anon_check`, `ftp_list`, `ftp_get`,
+`ftp_put`, `sftp_list`, `sftp_get`, `sftp_put`.
 
 | tool_id | params | tags |
 |---|---|---|
@@ -232,6 +249,9 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 
 ## auxiliaries/masscan.py — background-job
 
+Kernel bare name: `masscan` (curated alias). `run_masscan` is the
+function name, not the kernel bare name.
+
 | tool_id | params | tags |
 |---|---|---|
 | `run_masscan` | `target` (req), `ports` (None→"80"), `rate` (None int), `adapter` (None), `flags` (None), `exclude` (None→auto self-exclude), `options` (None) | `net.raw` |
@@ -274,6 +294,11 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 
 ## auxiliaries/smb_scanner.py
 
+Kernel bare names: `null_session` (auto-derived — strips `check_`
+prefix from `check_null_session`; `smb_null` was a stale curated alias
+for the deleted standalone function), `smb_recon` (curated alias for
+`run_smb_recon`).
+
 | tool_id | params | tags |
 |---|---|---|
 | `SMBScanner.check_null_session` | `target` (req), `remoteName` (False) | `net.services` (method) |
@@ -306,6 +331,9 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 | `web_login_brute` | `url`, `username` (req), `username_field`, `password_field` (defaults), `wordlist` (""), `max_attempts` (500), `rate` (10.0), `timeout` (8.0), `insecure` (False), `success_marker` (""), `fail_marker` (""), `success_statuses` ("301,302,303,307,308"), `host_header` ("") | `web.auth`, `brute.crack` |
 
 ## auxiliaries/web_probe.py
+
+Kernel bare name: `probe_web` (auto-derived; `web_probe` was a stale
+curated alias for the deleted `run_web_probe` wrapper).
 
 | tool_id | params | tags |
 |---|---|---|
@@ -351,6 +379,9 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 
 ## payloads/ffuf.py — background-job
 
+Kernel bare name: `ffuf_payload` (curated alias — NOT `ffuf`, which
+was a stale alias for the deleted `auxiliaries.ffuf_tools.run_ffuf`).
+
 | tool_id | alias | params | tags |
 |---|---|---|---|
 | `run_ffuf` | `ffuf_payload` | `url` (req), `wordlist` (""), `options` (""), `scope_handle` (None), `scope_platform` (None) | `web.fuzz` |
@@ -358,6 +389,12 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 | `ffuf_cancel` | auto | `job_id` (req) | `web.fuzz` |
 
 ## payloads/hash_crack.py
+
+No `hash_crack` bare name — that was a stale curated alias for the
+deleted `run_hash_crack` wrapper. Kernel bare names: `john` (strips
+`run_` from `run_john`), `hashcat` (strips `run_` from `run_hashcat`),
+`john_status`, `john_show`, `hashcat_status`, `hashcat_show`,
+`suggest_crack_mode`.
 
 | tool_id | params | tags |
 |---|---|---|
@@ -384,6 +421,10 @@ Tools with ¶ have `result_digest` adapters sharing `_burp_response_digest`.
 | `extract_js_routes` | `url` (req), `max_scripts` (25), `timeout` (15.0), `insecure` (False) | `recon.web` |
 
 ## payloads/metasploiting.py — class MetasploitClient
+
+No `metasploit` bare function — the class exposes 6 separate tools.
+Kernel bare names: `msf_dispatch`, `msf_index`, `msf_set_payload`,
+`msf_options`, `msf_interact`, `msf_close` (all curated aliases).
 
 | tool_id | alias | transport | params | notes |
 |---|---|---|---|---|

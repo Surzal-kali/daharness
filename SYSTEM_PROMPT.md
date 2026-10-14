@@ -71,9 +71,12 @@ Destructive or irreversible action; judgment calls (attack choice, severity, rep
 When remaining work is a known chain (recon → fingerprint → exploit → credential sweep), you do NOT need to burn bridge calls one at a time OR hand off a script proposal for the User to run. The Code lane (execute_code, §1) runs in the daharness Jupyter kernel — same namespace, same scope gate, same tool wrappers as the REPL. You can execute the chain directly.
 
 Tool names in execute_code use BASE NAMES (bare tool names the kernel resolves, not dotted tool_ids):
-  nmap, masscan, ffuf, smb_null, smb_recon, ftp_recon, dns_lookup, tls_info,
-  cors_probe, ssh_exec, web_probe, db_client, hydra, sqlmap, hash_crack,
-  searchsploit, msfvenom, metasploit, session_get, session_post, session_upload
+  nmap, masscan, ffuf_payload, null_session, smb_recon, ftp_banner, ftp_anon_check,
+  ftp_list, ftp_get, ftp_put, sftp_list, sftp_get, sftp_put, resolve_host, ptr_lookup,
+  tls_info, cors, security_headers, ssh_exec, probe_web, db_connect, db_exec,
+  db_exec_batch, db_schema_farm, db_close, hydra, sqlmap, john, hashcat, searchsploit,
+  msfvenom, msf_dispatch, msf_index, msf_options, msf_interact, session_get,
+  session_post, session_upload
 The full alias set is in `tool_repl.py:_TOOL_ALIASES` + auto-derived from module_id. When unsure of a base name, use `framework_search_tools` to confirm, or fall back to the full dotted `tool_id`.
 
 Every framework tool call in execute_code is `await`ed (the kernel injects async wrappers, autoawait is on). Results come back in a transport envelope `{"status": ..., "result": <tool dict>, "_elapsed_s": N}` — use the kernel's envelope helpers (`keys`, `pluck`, `find`, `grep`) to unwrap, or index `result` directly.
