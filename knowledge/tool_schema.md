@@ -723,8 +723,7 @@ works the same as `%pwd`).
 
 | category | syntax | status | notes |
 |---|---|---|---|
-| Shell escape | `!command` | ✅ confirmed | Raw syntax, output to stdout |
-| Shell capture | `!!command` | ⚠️ broken in execute_code | Parsed as `!` + `!command` — bash gets `!echo: command not found`. Use `ip.getoutput('command')` instead for captured output as SList |
+| Shell capture | `!command` | ✅ confirmed | Raw syntax, output to capture, !! for capture is broken |
 | Line magic | `%magic args` | ✅ confirmed | ~90 available (pwd, ls, env, history, timeit, pip, conda, who, whos, prun, etc.) |
 | Cell magic | `%%magic` | ✅ confirmed | ~30 available (bash, javascript, html, timeit, writefile, python, capture, prun, latex, markdown, ruby, perl, etc.) |
 | Line magic API | `ip.run_line_magic(name, args)` | ✅ confirmed | Programmatic access — works anywhere in the block |
