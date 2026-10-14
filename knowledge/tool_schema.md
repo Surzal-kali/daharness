@@ -579,6 +579,125 @@ Kernel bare names: `msf_dispatch`, `msf_index`, `msf_set_payload`,
 
 ---
 
+## utils/memory_tools.py — text memory store (shared with framework_memory_search)
+
+> **`remember_text`/`recall_text` and the bridge `framework_memory_search`
+> tool are the same store.** Both read/write the same ChromaDB-backed
+> vector memory. `remember_text` is the in-kernel write path;
+> `framework_memory_search` is the bridge read path. Both accept
+> `namespace` and `agent_id` for scoping. Use `remember_text` inside
+> `execute_code` chains to bank durable facts; use
+> `framework_memory_search` (or `recall_text` in-kernel) to retrieve
+> them in a later block or session.
+
+| tool_id | alias | params | tags |
+|---|---|---|---|
+| `remember_text` | `remember_text` | `text` (req), `namespace` ("engagement"), `memory_id` (""), `agent_id` (""), `important` (False) | `infra` |
+| `recall_text` | auto | `query` (req), `namespace` ("engagement"), `limit` (5), `agent_id` (""), `target` (""), `since_hours` (0) | `infra` |
+| `list_text_namespaces` | auto | none | `infra` |
+
+---
+
+## Kernel-only primitives (not @framework_tool — injected into execute_code namespace)
+
+These are not framework tools and do not appear in the tool registry.
+They are helpers injected into the Jupyter kernel namespace by the
+daharness executor. No import needed — call them directly.
+
+### Envelope helpers
+
+Called on the dict returned by any awaited tool call.
+
+| name | signature | returns | notes |
+|---|---|---|---|
+| `keys` | `keys(result)` | `list[str]` | Flat list of all keys in the unwrapped result dict |
+| `pluck` | `pluck(result, key)` | `list` | **Returns a LIST, not a scalar.** Recursively collects values at any key matching `key`. Index `[0]` for the first/only value. |
+| `find` | `find(result, query)` | `list` | Searches key paths for `query` substring; returns found values. Behavior on nested dicts / mixed types needs further documentation. |
+| `grep` | `grep(result, pattern)` | `list[tuple]` | Searches all text fields line-by-line. Returns `(field_path, matching_line)` tuples. Most useful helper for extracting specific content from large responses. |
+
+### Cookie jar management
+
+The session cookie jar is framework-side state that persists across
+`execute_code` blocks (unlike Python variables, which are per-block
+and do not carry forward). These primitives let you inspect and
+manipulate the jar directly — essential for multi-block exploit chains
+where you log in one block and exploit in the next.
+
+| name | signature | notes |
+|---|---|---|
+| `jar_state` | `jar_state()` | Current cookie jar contents |
+| `jar_cookie_header` | `jar_cookie_header()` | Cookie header string for manual injection |
+| `jar_store_cookie` | `jar_store_cookie(...)` | Manually store a cookie |
+| `jar_store_token` | `jar_store_token(...)` | Manually store a token (CSRF, etc.) |
+| `jar_clear` | `jar_clear()` | Clear all cookies/tokens |
+
+### Generic tool dispatch
+
+Fallback when a base name doesn't resolve (stale alias, missing curated
+mapping, or new tool without an alias yet).
+
+| name | signature | notes |
+|---|---|---|
+| `run_tool` | `run_tool(tool_id, **kwargs)` | In-kernel equivalent of bridge `framework_run_tool`. Takes dotted `tool_id` (e.g. `"auxiliaries.web_probe.probe_web"`). Preferred fallback when a base name fails with `NameError`. |
+| `discover_tools` | `discover_tools(intent, top_k=N)` | In-kernel equivalent of bridge `framework_search_tools`. Returns candidate tool menu by semantic match. |
+
+### Scope management (read-only from kernel)
+
+The scope gate fires on every traffic-sending call inside the kernel —
+identical enforcement to the bridge. The gate is automatic; no manual
+markers needed. Arming is via the REPL (`scope on <handle>`), persisted
+to `scope/.armed_packet_scope.json`, mtime-checked every call so REPL
+changes apply inside a running Brain. Arming is deliberately NOT exposed
+as an `@framework_tool` so the model cannot toggle it.
+
+The following appear in the kernel namespace for **read-only scope
+inspection**. They do not arm or disarm the gate.
+
+| name | signature | notes |
+|---|---|---|
+| `scope_status` | `scope_status()` | Check if gate is armed and for what scope |
+| `scope` | `scope()` | Query current scope state |
+| `scope_search` | `scope_search(query)` | Search armed scope for matching targets |
+| `scope_search_programs` | `scope_search_programs(...)` | Search program scope |
+| `load_program_scope` | `load_program_scope(...)` | Load a program scope manifest |
+
+### Other utility primitives
+
+| name | signature | notes |
+|---|---|---|
+| `scratch` | `scratch(...)` | Scratch storage for large tool results (cf. `framework_scratch_search` on bridge) |
+| `reportable` | `reportable(...)` | Check if a finding/action is reportable under current scope |
+| `check_trigger` | `check_trigger(...)` | Check trigger condition (details TBD) |
+| `list_sessions` | `list_sessions()` | List active typed handles (`ssh`, `msf`, `listener`, `db`) across all namespaces |
+| `job_status` | `job_status(job_id)` | Generic job status poller (works for nmap, ffuf, hydra, sqlmap, masscan, amass, etc.) |
+| `kill_tool_execution` | `kill_tool_execution(...)` | Kill a running tool execution by job_id |
+| `list_tool_executions` | `list_tool_executions(...)` | List recent tool executions |
+| `read_logs` | `read_logs(...)` | Read framework logs |
+| `b64encode` | `b64encode(data)` | Base64 encode |
+| `b64decode` | `b64decode(data)` | Base64 decode |
+
+### Display primitives (IPython)
+
+Standard IPython display classes are available in the kernel namespace.
+The correct route for JavaScript rendering is
+`display(Javascript(code))` — capital `J` class; lowercase `javascript`
+is not defined. The `%%javascript` cell magic works in the notebook
+frontend but not inside `execute_code` (it is a cell-level magic, not
+inline Python).
+
+Available classes: `HTML`, `Javascript`, `Markdown`, `Image`, `JSON`,
+`Code`, `IFrame`, `SVG`, `Latex`, `Math`, `Pretty`, `Video`, `Audio`.
+
+Available functions: `display`, `display_html`, `display_javascript`,
+`display_json`, `display_markdown`, `display_png`, `display_svg`,
+`update_display`, `clear_output`.
+
+> Whether `display(HTML(...))` or `display(Javascript(...))` renders
+> in the OpenWebUI chat interface is frontend-dependent and unconfirmed.
+> Text output (stdout) always comes through; rich display rendering
+> depends on the OWUI execute_code output handler.
+---
+
 ## excluded from the registry
 
 `memories.py` has 5 `@framework_tool`s (`remember`, `search`, `recall`,

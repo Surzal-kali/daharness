@@ -895,8 +895,9 @@ def build_ipython_namespace(
       • ``ToolManifest``, ``ToolRegistry`` — model classes
       • ``tools`` — ``{alias: wrapper}`` dict (same objects as the top-level
         aliases, collected for ``tools.<Tab>`` browsing)
-      • ``sessions()``, ``scope_on()``, ``scope_off()``, ``scope_status()``,
-        ``scope_search()`` — operator command wrappers
+      • ``sessions()``, ``scope_status()``, ``scope_search()`` — operator
+        command wrappers (scope_on/scope_off are NOT in the namespace;
+        use ``python tool_repl.py scope on|off`` from the terminal)
       • Stdlib convenience overlay — common modules (``json``, ``os``,
         ``hashlib``, ``base64``, ``socket``, ``re``, ``subprocess``,
         ``datetime``, ``ipaddress``, …) and bare functions (``sleep``,
@@ -974,26 +975,36 @@ def build_ipython_namespace(
 
     def _scope_on(handle: str, platform: str = "h1", strict: bool = True,
                   ip_boundary: bool = False):
-        """Arm the packet-scope gate.  Operator-only — not exposed to the agent.
+        """Arm the packet-scope gate.  REMOVED from the kernel namespace.
 
-        Example::
+        Arming/disarming is operator-only — the agent must not be able to
+        toggle the gate from execute_code.  Use the CLI instead:
 
-            scope_on("starbucks", platform="h1")
+            python tool_repl.py scope on <handle> [--platform h1]
         """
-        flags = []
-        if not strict:
-            flags.append("--no-strict")
-        if ip_boundary:
-            flags.append("--ip-boundary")
-        flags.append(f"--platform={platform}")
-        rest = f"on {handle} {' '.join(flags)}"
-        _scope_command(rest)
-    ns["scope_on"] = _scope_on
+        raise PermissionError(
+            "scope_on is not available in the kernel namespace. "
+            "Arming the scope gate is operator-only — use the CLI: "
+            "python tool_repl.py scope on <handle>"
+        )
+    # NOT registered in ns — the function exists only so the docstring
+    # is discoverable if someone imports it, but it's not callable from
+    # execute_code.
 
     def _scope_off():
-        """Disarm the packet-scope gate (lab mode — sends unrestricted)."""
-        _scope_command("off")
-    ns["scope_off"] = _scope_off
+        """Disarm the packet-scope gate.  REMOVED from the kernel namespace.
+
+        Disarming is operator-only — the agent must not be able to toggle
+        the gate from execute_code.  Use the CLI instead:
+
+            python tool_repl.py scope off
+        """
+        raise PermissionError(
+            "scope_off is not available in the kernel namespace. "
+            "Disarming the scope gate is operator-only — use the CLI: "
+            "python tool_repl.py scope off"
+        )
+    # NOT registered in ns — same as scope_on.
 
     def _scope_status():
         """Show the armed state, asset counts, and manifest age."""
@@ -2079,8 +2090,9 @@ class OllamaNavigableSuggest(_NavSuggest if _HAS_NAV_SUGGEST else object):
             "Async tool callables (call with await): "
             + self._tools_list() + ". Use these exact short aliases; never "
             "invent a dotted module path. "
-            "Sync operator functions: scope_on, scope_off, scope_status, "
-            "scope_search, sessions."
+            "Sync operator functions: scope_status, scope_search, "
+            "sessions. (scope_on/scope_off are NOT in the kernel — "
+            "use `python tool_repl.py scope on|off` from the terminal.)"
         )
 
     def _tools_list(self) -> str:
@@ -3091,8 +3103,9 @@ async def repl_loop(manifests: List[ToolManifest]):
                 print("  await smb_recon(host='10.0.0.1')")
                 print()
                 print("  Operator functions:")
-                print("    scope_on(handle, platform='h1')   scope_off()   scope_status()")
-                print("    scope_search('kw', assets=True)   sessions()")
+                print("    scope_status()   scope_search('kw', assets=True)   sessions()")
+                print("    (scope_on/scope_off are NOT available here — use the CLI:")
+                print("     python tool_repl.py scope on <handle> / scope off)")
                 print()
                 print("  Also: tools  (dict of all wrappers),  manifests  (list),")
                 print("        manifest_by_id('full.tool.id'),  run_tool,  resolve_callable")
@@ -3681,6 +3694,14 @@ def main():
         safe = not force
         sys.exit(asyncio.run(oneshot_sweep(safe=safe)))
 
+    elif mode == "scope":
+        # Operator-only scope gate control — the ONLY path to arm/disarm.
+        # scope_on/scope_off are deliberately not in the kernel namespace,
+        # so an agent in execute_code cannot toggle the gate.
+        rest = " ".join(args[1:])
+        _scope_command(rest)
+        return
+
     elif mode == "search":
         if len(args) < 2:
             print("Usage: python tool_repl.py search <query>")
@@ -3702,7 +3723,7 @@ def main():
 
     else:
         print(f"Unknown mode: {mode}")
-        print("Modes: run, info, sweep, search")
+        print("Modes: run, info, sweep, search, scope")
         print("Kernel lane: --kernel, --install-kernelspec")
         print("Or run without arguments for the interactive REPL.")
         sys.exit(1)

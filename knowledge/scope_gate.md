@@ -3,10 +3,29 @@
 ## what it is
 
 The scope gate (`utils/scope_gate.py`) is a framework-side backstop the
-operator arms via the REPL (`scope on <handle>`). State is persisted to
-`scope/.armed_packet_scope.json` (mtime-checked every call, so REPL changes
-apply inside a running Brain). Arming is deliberately NOT exposed as an
-`@framework_tool` so the secretary can never toggle it.
+operator arms. State is persisted to `scope/.armed_packet_scope.json`
+(mtime-checked every call, so changes apply inside a running Brain).
+Arming is deliberately NOT exposed as an `@framework_tool` so the
+secretary can never toggle it.
+
+## kernel wrappers (execute_code / REPL)
+
+The Jupyter kernel namespace (same as the REPL) exposes scope wrappers.
+`scope_on` and `scope_off` are deliberately NOT in the namespace —
+they raise `PermissionError` if called. Arming/disarming is
+operator-only via the CLI:
+
+    python tool_repl.py scope on <handle> [--platform h1]
+    python tool_repl.py scope off
+
+- `scope_status()` — check armed state, loaded program/handle, asset
+  counts, manifest age. Agent-callable — use this to verify the gate is
+  armed before running offensive tools.
+- `scope_search(query, platform="all", assets=False, ...)` — query
+  bug-bounty boards for matching programs. Agent-callable for recon.
+
+The wrappers are sync (not `await`ed) — they return printed output, not
+transport envelopes.
 
 ## how it works
 
@@ -30,7 +49,10 @@ for an example.
   every tool dispatch goes through the gate.
 - **execute_code lane** (Jupyter kernel): the gate fires on every
   traffic-sending call inside the kernel — identically to the bridge. The
-  kernel does not bypass the scope gate.
+  kernel does not bypass the scope gate. `scope_status()` and
+  `scope_search()` are bare callables; `scope_on()`/`scope_off()` are
+  NOT in the namespace (they raise `PermissionError`). Arming/disarming
+  is operator-only via the CLI (`python tool_repl.py scope on|off`).
 - **REPL lane** (`tool_repl.py`): same enforcement — the REPL calls the
   same tool functions.
 - **In-process fallback** (`daharness/executor.py`): when the Brain socket

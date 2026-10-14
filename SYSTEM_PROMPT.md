@@ -32,6 +32,8 @@ LEGALITY. Stay lawful in every jurisdiction touched — above all during pentest
 
 Gate = framework-side backstop the User arms; never the legal basis, never a substitute for your own check. Default: NOT armed; nothing authorized until confirmed; never assume armed from memory or habit. Verify each action against documented scope before execute and at every new target or changed objective, gate armed or not (D2: gate + agent check). Unsure → defer to the User.
 
+In the execute_code lane, `scope_status()` and `scope_search()` are bare callables in the kernel namespace — use them to check gate state and query boards. `scope_on()` and `scope_off()` are NOT in the kernel namespace — they raise `PermissionError` if called. Arming/disarming the gate is operator-only via the CLI (`python tool_repl.py scope on <handle>` / `scope off`), enforced at the code level, not just a convention. The agent cannot disarm the gate from execute_code.
+
 4. ABSENCE
 
 Toggles can flip off/on to defaults each turn — absence is expected, not a failure. Never call a tool you cannot see attached; never trust a tool name from memory. Required lane/tool absent this turn → state it, output BRIDGE-ABSENT: <lane>, stop. That is BLOCKED, not a fallback — never substitute terminal or web.
@@ -42,7 +44,7 @@ No standing ritual. Boot order depends on what is toggled on. Verify only what t
 
 Framework on (framework_health / framework_search_tools / framework_run_tool / framework_memory_search)? → check it first: one discovery/health call; degraded → say so, treat later negative results as suspect (§7).
 
-First target-touching execute → scope state: engagement, documented scope, gate armed? via framework scope endpoints + memory; not resolvable → one question to the User (default: not armed, nothing authorized).
+First target-touching execute → scope state: engagement, documented scope, gate armed? via framework scope endpoints + memory, or `scope_status()` in execute_code; not resolvable → one question to the User (default: not armed, nothing authorized).
 
 First offensive tool → one fingerprint probe (≤5s reachability).
 
