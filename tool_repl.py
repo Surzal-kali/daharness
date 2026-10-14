@@ -631,9 +631,10 @@ _STDLIB_BARES: Dict[str, Any] = {
 # ``display()`` itself is deliberately absent: IPython's ``init_displayhook()``
 # (interactiveshell.py ~896) injects it into ``builtins`` in every shell,
 # including the ZMQ kernel — so it never needed us.  These four wrapper classes
-# (``Markdown``, ``HTML``, ``JSON``, ``Image``) are injected as bare names so
-# cells can do ``Markdown("## heading")`` / ``HTML(table_str)`` / ``Javascript(js)``
-# with zero imports.  Loaded lazily so headless modes (``run`` / ``oneshot`` / ``search``)
+# (``Markdown``, ``HTML``, ``JSON``, ``Image``, ``Math``, ``Latex``) are injected
+# as bare names so cells can do ``Markdown("## heading")`` / ``HTML(table_str)`` /
+# ``Math(r'\\sum p_i \\log p_i')`` / ``Latex(r'$$H = -\\sum ...$$')`` with zero
+# imports.  Loaded lazily so headless modes (``run`` / ``oneshot`` / ``search``)
 # that never build the IPython namespace pay nothing.
 _DISPLAY_CLASSES: Dict[str, Any] | None = None
 
@@ -642,8 +643,8 @@ def _load_display_classes() -> Dict[str, Any]:
     """Lazy IPython.display wrapper classes for bare-name injection.
 
     Returns a dict of ``{name: class}`` for ``Markdown``, ``HTML``, ``JSON``,
-    ``Image``, ``Javascript``, and ``DisplayHandle``.  ``display()`` is not
-    included — it's a builtin in every IPython shell already.
+    ``Image``, ``Javascript``, ``Math``, ``Latex``, and ``DisplayHandle``.
+    ``display()`` is not included — it's a builtin in every IPython shell already.
 
     ``DisplayHandle`` enables stateful, in-place output updates:
     ``h = display(obj, display_id=True); h.update(new_obj)``.  In the ZMQ
@@ -656,7 +657,16 @@ def _load_display_classes() -> Dict[str, Any]:
     """
     global _DISPLAY_CLASSES
     if _DISPLAY_CLASSES is None:
-        from IPython.display import DisplayHandle, HTML, Image, JSON, Javascript, Markdown
+        from IPython.display import (
+            DisplayHandle,
+            HTML,
+            Image,
+            JSON,
+            Javascript,
+            Latex,
+            Markdown,
+            Math,
+        )
 
         _DISPLAY_CLASSES = {
             "Markdown": Markdown,
@@ -664,6 +674,8 @@ def _load_display_classes() -> Dict[str, Any]:
             "JSON": JSON,
             "Image": Image,
             "Javascript": Javascript,
+            "Math": Math,
+            "Latex": Latex,
             "DisplayHandle": DisplayHandle,
         }
     return _DISPLAY_CLASSES
