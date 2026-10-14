@@ -714,12 +714,25 @@ Available functions: `display`, `display_html`, `display_javascript`,
 
 ### IPython magics in execute_code
 
-The execute_code kernel is a real IPython kernel, so **IPython line
-magics and shell escapes work inside execute_code blocks**:
+The execute_code kernel is a real IPython kernel (ZMQInteractiveShell),
+so **line magics, cell magics, and shell escapes are all available**
+inside execute_code blocks.
 
-| magic | behavior | confirmed |
-|---|---|---|
-| `!command` | Shell escape — output to stdout | yes |
-| `!!command` | Shell escape — output captured as list | yes |
-| `%magic args` | Line magic (e.g. `%timeit`, `%who`) | yes |
-| `%%magic` | Cell magic (e.g. `%%bash`, `%%javascript`) | yes |
+Automagic is ON — the `%` prefix is optional for line magics (`pwd`
+works the same as `%pwd`).
+
+| category | syntax | status | notes |
+|---|---|---|---|
+| Shell escape | `!command` | ✅ confirmed | Raw syntax, output to stdout |
+| Shell capture | `!!command` | ⚠️ broken in execute_code | Parsed as `!` + `!command` — bash gets `!echo: command not found`. Use `ip.getoutput('command')` instead for captured output as SList |
+| Line magic | `%magic args` | ✅ confirmed | ~90 available (pwd, ls, env, history, timeit, pip, conda, who, whos, prun, etc.) |
+| Cell magic | `%%magic` | ✅ confirmed | ~30 available (bash, javascript, html, timeit, writefile, python, capture, prun, latex, markdown, ruby, perl, etc.) |
+| Line magic API | `ip.run_line_magic(name, args)` | ✅ confirmed | Programmatic access — works anywhere in the block |
+| Cell magic API | `ip.run_cell_magic(name, args, body)` | ✅ confirmed | Programmatic access — works anywhere in the block |
+| Shell API | `ip.system('command')` | ✅ confirmed | Programmatic `!` equivalent |
+| Shell API | `ip.getoutput('command')` | ✅ confirmed | Programmatic `!!` equivalent — returns SList |
+
+> `%%javascript` and `%%html` return IPython display objects
+> (`<IPython.core.display.Javascript object>`). Whether these render
+> in the OpenWebUI chat interface is frontend-dependent. Text output
+> (stdout) always comes through.
