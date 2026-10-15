@@ -142,9 +142,17 @@ RUN mv /home/jovyan/framework-build/tmp-copy/gen_repl_stubs.py /home/jovyan/fram
     && mv /home/jovyan/framework-build/scripts_gen_repl_stubs.py /home/jovyan/framework-build/scripts/gen_repl_stubs.py \
     && mv /home/jovyan/framework-build/tmp-copy/constants.py /home/jovyan/framework-build/tmp-copy/tool_repl.py /home/jovyan/framework-build/
 
+# This step runs as root with $HOME=/home/jovyan, and stub generation
+# dynamic-imports the framework tool tree — utils/packetcraft.py imports
+# scapy.all, and scapy's XDG config probe (scapy/main.py:_probe_xdg_folder)
+# makes ~/.config with mode 0700 under $HOME. As root that baked an
+# untraversable root-owned ~/.config into the image; at runtime jupytext's
+# global-config walk then raised PermissionError -> ~/.config/jupytext and
+# every POST /api/contents (any notebook open/create) 500'd. Point the probe
+# at a throwaway HOME so nothing lands in the real home dir.
 RUN mkdir -p /opt/conda/share/framework-stubs /opt/conda/share/jupyter/pyrightconfig.d \
     && cd /home/jovyan/framework-build \
-    && FRAMEWORK_STUBS_DIR=/opt/conda/share/framework-stubs \
+    && HOME=/tmp/build-home FRAMEWORK_STUBS_DIR=/opt/conda/share/framework-stubs \
        PYTHONDONTWRITEBYTECODE=1 python /home/jovyan/framework-build/scripts/gen_repl_stubs.py \
     && rm -rf /home/jovyan/framework-build \
     && chown -R ${NB_UID}:${NB_GID} /opt/conda/share/framework-stubs \
@@ -161,6 +169,13 @@ EOF
 
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm git\
     && rm -rf /var/lib/apt/lists/*
+
+# Belt-and-braces: anything a root step created inside jovyan's home (now or
+# in a future layer) would shadow/break the server at runtime — .config was
+# the first case (scapy XDG probe, 0700 root-owned, see stub-gen comment).
+# The base image's own fix-permissions utility normalizes ownership here.
+RUN fix-permissions /home/${NB_USER}
+
 USER ${NB_UID}
 WORKDIR /home/jovyan/work
 
