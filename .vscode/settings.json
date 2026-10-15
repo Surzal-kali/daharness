@@ -25,8 +25,7 @@
         "/home/kali/.local/share/framework-stubs",
         "${workspaceFolder}"
     ],
-
-    // ── Complete Lint/Warning Suppression ────────────────────────────────────
+        // ── Complete Lint/Warning Suppression ────────────────────────────────────
     "python.analysis.diagnosticSeverityOverrides": {
         // This is the silver bullet for your script namespace injection:
         "reportUndefinedVariable": "none",
@@ -36,3 +35,5 @@
         "reportMissingModuleSource": "none"
     }
 }
+
+

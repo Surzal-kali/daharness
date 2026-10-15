@@ -55,6 +55,27 @@ attach an async listener via `all_listeners=[...]`, `session.initialize()`,
 `node /opt/conda/lib/python3.13/site-packages/pyright/dist/index.js
 --outputjson <doc>` — the wheel's bundled CLI resolves identical config.
 
+## Ruff notebook lane (dabooks)
+
+`dabooks/ruff.toml` (repo) lints `**/*.ipynb` cell-aware: per-file ignores
+(`E402 E501 F401 F841 F821` — F821 because cells lint in isolation, so
+later-cell variables are false positives) + a generated `builtins` block
+listing every kernel-injected name (tool aliases, stdlib overlay, envelope
+helpers, operator wrappers, `display`/`get_ipython`). The block is maintained
+by `scripts/gen_repl_stubs.py` between BEGIN/END marks and sourced from
+`build_ipython_namespace()` verbatim — `--check` flags drift. Run via the
+repo venv (`venv/bin/ruff`; not on system PATH). Editor side: the
+**builtins.pyi fork** (generated into the stub dir by `gen_repl_stubs.py`) —
+pyright/Pylance resolves a stubPath-found `builtins.pyi` as a REPLACEMENT for
+its builtins module, so the fork = Pylance's complete typeshed
+`builtins.pyi` + appended permissive decls for every kernel-injected name.
+Bare injected names (`nmap`, `pluck`, …) resolve without diagnostics;
+typos stay flagged. Generator picks the fork source: newest
+`~/.vscode-server/extensions/ms-python.vscode-pylance-*/dist/typeshed-
+fallback/stdlib/builtins.pyi`, falling back to the venv wheel's bundled
+copy; `--check` detects drift including Pylance-extension upgrades. The
+editor blanket kill was REMOVED from `.vscode/settings.json` (2026-10-15).
+
 ## Sourced-hook lesson (restart-loop postmortem)
 
 docker-stacks `run-hooks.sh` SOURCES hooks (`source "${hook_file}"`) — a hook
