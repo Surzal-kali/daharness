@@ -21,20 +21,22 @@ shim `framework_tools.py` into `FRAMEWORK_STUBS_DIR` (default
 - `dockered/jupyter-lsp-pyright.json` → config.d registering a custom
   jupyter-lsp spec: `sh -c exec node <pip wheel>/pyright/dist/langserver.index.js --stdio`
   (the pip pyright wheel bundles the full npm pyright; node runs it directly).
-- `dockered/jupyter-pyrightconfig.json` bind-mounted over
-  `/home/jovyan/work/pyrightconfig.json` (read-only) — `stubPath` + rule
-  suppressions. This is the authoritative settings channel: pyright restarts its
+  Same file drops pylsp via an `argv: []` entry — jupyter-lsp filters
+  empty-argv specs in `_collect_language_servers` (bare `[]` as the server
+  value crashes this build instead; see postmortem below).
+- pyrightconfig for the lane lives in `jupyter.Dockerfile`'s
+  `/opt/conda/share/jupyter/pyrightconfig.d/` heredoc; the before-notebook.d
+  hook (`10-refresh-stubs.sh`) copies it into `/home/jovyan/work/` at boot
+  (the notebooks dir is a host bind-mount, image-baked content there is
+  shadowed). This is the authoritative settings channel: pyright restarts its
   analysis service on `didChangeConfiguration` and only honors a subset there,
   but a config file at the workspace root is honored on every service restart.
-- pylsp coexists (this jupyter-lsp 2.3.1 crashes on the `"pylsp": []` opt-out —
-  `'list' object has no attribute 'get'` in `_collect_language_servers`). Its
-  jedi squiggles will also flag runtime-injected names; disable LSP diags from
-  the client or remove python-lsp-server if the noise matters.
-- Same-name `.py`/`.pyi`: pyright resolves types from the `.pyi`; the `.py` shim
-  exists for runtime star-imports. VS Code suppression set matches here:
-  reportUndefinedVariable / reportMissingImports / reportMissingModuleSource /
-  reportAttributeAccessIssue all `none` — the kernel injects names statically
+  The file suppresses the same rules `.vscode/settings.json` does
+  (reportUndefinedVariable / reportMissingImports / reportMissingModuleSource /
+  reportAttributeAccessIssue `none`) — the kernel injects names statically
   invisible to any engine.
+- Same-name `.py`/`.pyi`: pyright resolves types from the `.pyi`; the `.py`
+  shim exists for runtime star-imports.
 
 ## Config: why pyrightconfig.json, not didChangeConfiguration
 
@@ -43,10 +45,7 @@ honors them on every analysis-service restart — verified live that `stubPath`
 there resolves every tool alias cleanly. The jupyterlab-lsp settings-delivery
 path (`workspace/didChangeConfiguration`) is unreliable: pyright restarts its
 analysis service mid-session and honors only a subset of settings there, so
-the config file is the authoritative channel. The file also loads a handful
-of suppressions matching `.vscode/settings.json` (reportUndefinedVariable /
-reportMissingImports / reportMissingModuleSource / reportAttributeAccessIssue
-all `none`) — the kernel injects names statically invisible to any engine.
+the config file is the authoritative channel.
 
 Verification method (probes were removed after use; recreate if needed):
 drive `LanguageServerManager` from `jupyter-lsp` with the config.d spec list,
