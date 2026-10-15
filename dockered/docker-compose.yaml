@@ -152,6 +152,20 @@ services:
       # image rebuilds don't wipe the Copilot login. Contains credentials —
       # gitignored as dockered/jupyter-nbi/.
       - ./jupyter-nbi:/home/jovyan/.jupyter/nbi
+
+      # Env-level NBI config baked by the Dockerfile, bind-mounted read-only:
+      # NBI layers the env-prefix file under the user file, so this is the
+      # rebuild-proof baseline for settings the Settings UI never re-persists
+      # (notably chatbook_backend_kernel — without it Chatbook code runs on
+      # python3 and loses the framework-tool stubs + rules).
+      - ./jupyter-nbi-config.json:/opt/conda/share/jupyter/nbi/config.json:ro
+
+      # pyrightconfig for the jupyterlab-lsp pyright lane: NOT mounted — work/
+      # is a host bind-mount and the image cannot bake into it. The before-
+      # notebook.d hook (10-refresh-stubs.sh) copies the baked config from
+      # /opt/conda/share/jupyter/pyrightconfig.d/ on every boot (only if the
+      # operator hasn't pinned their own). Keep dockered/jupyter.Dockerfile's
+      # baked heredoc and stubPath in sync if editing by hand.
     environment:
       - JUPYTER_TOKEN=${JUPYTER_TOKEN}
       - FRAMEWORK_GATEWAY_URL=http://open-terminal:6000

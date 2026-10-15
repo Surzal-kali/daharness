@@ -1,0 +1,26 @@
+{
+  "LanguageServerManager": {
+    "language_servers": {
+      "pyright": {
+        "version": 2,
+        "languages": ["python"],
+        "mime_types": ["text/python", "text/x-ipython"],
+        "spec": {
+          "display_name": "pyright (bundled, framework stubs)",
+          "requires_documents_on_disk": false
+        },
+        "argv": [
+          "sh",
+          "-c",
+          "exec node /opt/conda/lib/python3.13/site-packages/pyright/dist/langserver.index.js --stdio"
+        ],
+        "requires_documents_on_disk": false
+      },
+      "pylsp": {
+        "argv": [],
+        "languages": ["python"],
+        "version": 2
+      }
+    }
+  }
+}

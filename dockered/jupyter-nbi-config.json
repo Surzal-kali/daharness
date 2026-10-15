@@ -1,0 +1,4 @@
+{
+  "_readme_": "Environment-level notebook-intelligence config. Baked into the jupyter image by jupyter.Dockerfile and bind-mounted read-only over /opt/conda/share/jupyter/nbi/config.json (see dockered/docker-compose.yaml). Why this exists: the Settings UI persists only to the user file (~/.jupyter/nbi/config.json), which lives on a gitignored volume and is wiped on image recreates. NBI's config.load() layers the env file UNDER the user file, so this file is a rebuild-proof admin baseline; values apply unless the user file overrides them at runtime. Keys must match notebook-intelligence's settings-handler allowlist (extension.py POST settings valid_keys). Chatbook execution-mode knobs (chatbook_execution_mode etc.) are deliberately NOT baked: the extension clamps them against NBI_CHATBOOK_MAX_EXECUTION_MODE and execution policy is an operator-facing safety setting.",
+  "chatbook_backend_kernel": "daharness"
+}
