@@ -48,11 +48,33 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-# Ollama endpoint: lab LAN address (host lane: 10.10.10.134:11434 via the
-# enp92s0 lab-switch lane). Override with OLLAMA_BASE_URL in .env.
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://192.168.56.1:11434/v1").rstrip(
+# Ollama endpoint: defaults to the local Ollama daemon. Both forms are
+# accepted and normalized here: "http://host:11434" (native) and
+# "http://host:11434/v1" (OpenAI-compatible). The normalized "/v1" value is
+# what pydantic-ai's OllamaProvider requires (it posts <base>/chat/completions)
+# while the API-path consumers (embeddings, memory, REPL ghost text) strip the
+# "/v1" themselves. Set OLLAMA_BASE_URL in .env to override (loopback or LAN
+# only — see README Legal Addendum; cloud LLM APIs leak target data).
+# Re-index after changing it.
+_OLLAMA_BASE_RAW = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").rstrip(
     "/"
 )
+if not _OLLAMA_BASE_RAW.endswith("/v1"):
+    OLLAMA_BASE_URL = _OLLAMA_BASE_RAW + "/v1"
+    logger.info(
+        "OLLAMA_BASE_URL was set without the /v1 suffix (%s) — normalized to %s "
+        "(the OpenAI-compatible endpoint pydantic-ai requires).",
+        _OLLAMA_BASE_RAW,
+        OLLAMA_BASE_URL,
+    )
+else:
+    OLLAMA_BASE_URL = _OLLAMA_BASE_RAW
+if "OLLAMA_BASE_URL" not in os.environ:
+    logger.warning(
+        "OLLAMA_BASE_URL is not set — using the default %s. Set it in .env "
+        "(copy .env.example to .env) if your Ollama daemon runs elsewhere.",
+        OLLAMA_BASE_URL,
+    )
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "9000"))
 # Lane-safe: $WORKSPACE_ROOT when it exists (host lane), else this checkout —

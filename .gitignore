@@ -57,9 +57,11 @@ WIP_*.*
 
 # --- dependency lockfiles ---
 # requirements.txt is the tracked canonical pinned dependency freeze.
-# The exception un-ignores it so it stays version-controlled.
+# requirements-dev.txt is the full dev-venv export (see pyproject.toml extras).
+# The exception un-ignores them so they stay version-controlled.
 *.txt
 !requirements.txt
+!requirements-dev.txt
 todo.md
 dockered/.env.save
 .vscode/*

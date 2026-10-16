@@ -1,26 +1,93 @@
-# Modular Security Framework
+# daharness
 
-A headless, MCP-capable orchestration harness for security research and
-bug-bounty automation. A small local LLM (the "tool secretary") semantically
-searches a vector-indexed tool registry, selects the right module for a
-natural-language request, and executes it. Inside the harness, every
-execution pauses for human-in-the-loop sign-off: the operator sees the full
-tool manifest and arguments before approving, and only an approved tool
-actually runs. (This gate is an internal-harness feature — the API gateway
-and MCP lanes bypass it unless the harness you're integrating adds its own
-approval layer.) Large tool outputs stay out of the model's context window
-via a result-projection middleman (`full` | `digest` | `page` — `digest` by
-default) that stores the raw evidence in a durable scratch store and hands
-the model a compact envelope instead.
+A platform for agentic, iterative security testing — a local LLM that plans,
+picks, and runs 150+ security tools under your approval, with target data
+never leaving your hardware.
 
-The framework follows a "hybrid glue" architecture: Python handles
-orchestration, agent loops, and API surfaces; C/C++ handles performance-critical
-and low-level systems work (raw sockets, packet framing).
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/Security-Policy-yellow.svg)](.github/SECURITY.md)
 
-The framework is built around a **hunt lifecycle**: load a HackerOne program
-scope, enumerate the attack surface, run scanners against in-scope targets,
-gather evidence, and file structured findings — all coordinated by the
-secretary model and gated by scope-compliance and reportability checks.
+## What it is
+
+One engine — a vector-indexed registry of `@framework_tool` callables and
+gate-checked execution — surfaced through four lanes. Pick whichever fits
+the moment:
+
+- **Secretary chat** — talk to a local Ollama model that semantically
+  searches the registry, chooses the right tool for "fuzz that login form",
+  and executes it after you approve the exact call
+- **API gateway + MCP** — `POST /tools/execute` and a streamable-HTTP MCP
+  endpoint for wiring the registry into any external agent harness
+- **Tool REPL** — bypass the LLM entirely: pick a tool, pass args, see raw
+  output (`python tool_repl.py run <tool_id> --flag value`)
+- **Jupyter kernel** — the same namespace preloaded into notebook cells for
+  engagement journals (`python tool_repl.py --install-kernelspec`)
+
+The intended workflow is a **hunt lifecycle**: load a program scope →
+enumerate the surface → scan in-scope targets → collect evidence → file
+structured findings — the scope-compliance and reportability gates hold at
+every step.
+
+Every execution is grounded (the model can only call tools its search
+actually surfaced), approval-gated in the secretary lane, and
+scope-compliance-checked against the loaded HackerOne/Intigriti program.
+Large tool outputs are projected out of model context into a durable scratch
+store (`full | digest | page` — `digest` by default) with a retrieval
+reference — evidence stays queryable without flooding context.
+
+## Why local-only models
+
+The secretary reads target responses: credentials, tokens, internal IPs,
+response bodies. A cloud LLM API transmits every one of those bytes to a
+third party — unauthorized egress under most programs' ROE and data-protection
+law. The framework defaults to a locally hosted Ollama endpoint and the docs
+refuse to pretend otherwise. See the
+[Legal Addendum](#legal-addendum--local-models-only-for-pentesting) under
+Safety Notes and the responsible-use policy in
+[`SECURITY.md`](.github/SECURITY.md).
+
+## Quick start
+
+Prereqs: Python 3.12+, [Ollama](https://ollama.ai) with an embedding model
+(`nomic-embed-text`) and a chat model, and a ChromaDB server
+(`docker run -p 9000:8000 chromadb/chroma`).
+
+```bash
+git clone https://github.com/Surzal-kali/daharness.git
+cd daharness
+
+# Minimal lab demo: core runtime + 3-line config
+python -m venv venv && source venv/bin/activate
+pip install -e .
+cp .env.example .env          # set: OLLAMA_BASE_URL, SECRETARY_MODEL
+python -m daharness.core      # index the tool registry
+python bootstrap.py           # chat with the secretary
+
+# Full bounty workbench: optional lanes + dev tooling
+pip install -e ".[web,jupyter,dev]"
+pip install -r requirements-dev.txt   # exact dev-venv repro, all 361 pins
+python tool_repl.py sweep      # smoke-test every tool with safe args
+pytest tests/
+```
+
+Details: all env knobs (`.env.example` — 240 lines of them, most optional),
+external CLI tools
+([Nmap, ZAP, Metasploit, ffuf, …](#external-dependencies)), Docker bench
+([`dockered/`](dockered/)), the operator scope gate
+([`knowledge/scope_gate.md`](knowledge/scope_gate.md)), and the
+first-run/when-it-doesn't-work playbook
+([`knowledge/first_run.md`](knowledge/first_run.md)).
+
+If something doesn't work: `python tool_repl.py sweep` and the
+`framework_status` tool tell you whether it's your setup or the tool — then
+check [`AGENTS.md`](AGENTS.md) pitfalls or open an issue.
+
+## The rest of this README
+
+The sections below are the deep architecture reference — tool discovery, the
+Brain sidecar, transports, the approval loop, all env knobs, and the legal
+addendum. Written for operators and contributors.
+Contributor walkthrough: [`CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
 ## Architecture
 
@@ -794,8 +861,10 @@ values; see `.env.example` for the full key list):
 ### Running
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies — pip install -e ".[web,dev]" installs the core runtime
+# (see pyproject.toml) plus the optional lanes you need as editable extras.
+# The full pinned dev-venv export is requirements-dev.txt.
+pip install -r requirements.txt   # or: pip install -e .  for just the core
 
 # Index tools into the vector registry
 python -m daharness.core
@@ -836,6 +905,9 @@ pause for operator approval.
 
 ## Adding a New Tool
 
+> Contributor-oriented walkthrough (with the tool-quality checklist and PR
+> checklist): see [`CONTRIBUTING.md`](.github/CONTRIBUTING.md).
+
 ### Python module (argparse, runs as subprocess)
 
 1. Create a `.py` file under `auxiliaries/`, `payloads/`, `listeners/`,
@@ -871,6 +943,10 @@ pause for operator approval.
 
 ## Safety Notes
 
+- **Authorized use only.** This software is for security research on systems
+  you are explicitly authorized to test. See the full responsible-use policy
+  in [`.github/SECURITY.md`](.github/SECURITY.md) — authorization first, the
+  law applies to you regardless, target data never leaves your hardware.
 - **Human-in-the-loop (secretary lane — always on there):** every
   secretary-driven tool execution pauses for explicit operator sign-off —
   `execute_tool` is declared `requires_approval=True`, the run halts with
