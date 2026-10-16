@@ -234,12 +234,6 @@ Kernel bare names: `ftp_banner`, `ftp_anon_check`, `ftp_list`, `ftp_get`,
 | `list_apk_targets` | none | `infra` |
 | `run_jadx` ¶ | `target` (req), `command` (req: decompile/manifest/class/grep/read/tree), `deobf` (False), `show_bad_code` (False), `mode` ("auto"), `threads` (None), `no_res` (False), `force` (False), `single_class` (None), `pattern` (None), `glob` (None), `case_insensitive` (False), `max_matches` (None), `max_files` (None), `path` (None), `offset` (0), `tree_mode` ("files"), `limit` (None) | `infra`; digest adapter |
 
-## auxiliaries/job_status.py
-
-| tool_id | params | tags |
-|---|---|---|
-| `job_status` | `job_id` (req) | untagged |
-
 ## auxiliaries/ldap_search.py
 
 | tool_id | params | tags |
@@ -669,7 +663,6 @@ inspection**. They do not arm or disarm the gate.
 | `reportable` | `reportable(...)` | Check if a finding/action is reportable under current scope |
 | `check_trigger` | `check_trigger(...)` | Check trigger condition (details TBD) |
 | `list_sessions` | `list_sessions()` | List active typed handles (`ssh`, `msf`, `listener`, `db`) across all namespaces |
-| `job_status` | `job_status(job_id)` | Generic job status poller (works for nmap, ffuf, hydra, sqlmap, masscan, amass, etc.) |
 | `kill_tool_execution` | `kill_tool_execution(...)` | Kill a running tool execution by job_id |
 | `list_tool_executions` | `list_tool_executions(...)` | List recent tool executions |
 | `read_logs` | `read_logs(...)` | Read framework logs |

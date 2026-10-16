@@ -21,9 +21,9 @@ if sys.version_info < MIN_PYTHON:
     )
     sys.exit(1)
 
-from daharness import _chat, ToolRegistry, OllamaEmbeddingFunction
-from daharness.findings import ensure_ids_db
-from constants import brain_socket_path
+from daharness import _chat, ToolRegistry, OllamaEmbeddingFunction  # noqa: E402
+from daharness.findings import ensure_ids_db  # noqa: E402  -- after .env load
+from constants import brain_socket_path  # noqa: E402  -- after .env load
 
 # --- .env loading (sudo-safe) ------------------------------------------------
 # When the framework is launched under sudo, the shell environment is stripped
@@ -32,6 +32,15 @@ from constants import brain_socket_path
 # override=True is deliberate (operator decision 2026-09-25): .env is the
 # AUTHORITATIVE config channel — the stack boots under root where shell
 # exports don't survive env_reset.  Do NOT "fix" this to override=False.
+#
+# NOTE: this load deliberately sits AFTER the daharness import. The package
+# __init__ now loads .env itself (without override) before registry.py bakes
+# OLLAMA_BASE_URL into a module constant; this block then re-applies with
+# override=True for the rest of the stack's authoritative-.env semantics.
+# Keeping both gives: registry constants see .env, and shell exports are still
+# overridden by .env for the operator's decision above. Do not move the
+# daharness import below this block as a "fix" — that resurrects the bug
+# where os.environ at registry-import time is whatever the launcher had.
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent / ".env", override=True)

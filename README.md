@@ -884,7 +884,7 @@ pytest tests/
 ```
 
 For a systemd-managed service, copy the template from
-[`scripts/daharness.service`](/home/kali/github/stuff/scripts/daharness.service)
+[`scripts/daharness.service`](/home/kali/github/daharness/scripts/daharness.service)
 to `/etc/systemd/system/` (adjust the checkout and virtualenv paths if needed),
 then enable and start it:
 

@@ -144,8 +144,8 @@ services:
       # routes via the workbench interface for framework traffic.
       egress:
     volumes:
-      - /home/kali/github/stuff:/home/jovyan/framework
-      - /home/kali/github/stuff/dabooks:/home/jovyan/work       # notebooks — on host, git init here for version control
+      - /home/kali/github/daharness:/home/jovyan/framework
+      - /home/kali/github/daharness/dabooks:/home/jovyan/work       # notebooks — on host, git init here for version control
       - /home/kali/jupyter-home/.ipython:/home/jovyan/.ipython   # IPython history survives recreates
 
       # Persist notebook-intelligence settings + the stored GitHub token so

@@ -3,7 +3,7 @@
 # (`tool_repl.py --kernel`): the framework namespace in user_ns, attachable
 # from any local Jupyter frontend. See tool_repl.py:_launch_kernel.
 Description=daharness tool kernel (tool_repl.py --kernel)
-Documentation=file:///home/kali/github/stuff/AGENTS.md
+Documentation=file:///home/kali/github/daharness/AGENTS.md
 # Kernel startup is self-contained (tool discovery + namespace build); the
 # network matters to the tools the kernel runs, not to booting it.
 After=network.target
@@ -15,11 +15,11 @@ Type=simple
 # so the desktop user's IDEs can attach — see _kernel_owner() in tool_repl.py.
 User=root
 Group=root
-WorkingDirectory=/home/kali/github/stuff
+WorkingDirectory=/home/kali/github/daharness
 # No tty under systemd: the kernel arms the SIGTERM/shutdown_request path
 # (not the double-Ctrl-C tty exit).
 StandardInput=null
-ExecStart=/home/kali/github/stuff/venv/bin/python /home/kali/github/stuff/tool_repl.py --kernel
+ExecStart=/home/kali/github/daharness/venv/bin/python /home/kali/github/daharness/tool_repl.py --kernel
 
 # The kernel banners the connection-file path + attach command to stderr
 # before ipykernel swaps the streams; journald is the only place to read it:

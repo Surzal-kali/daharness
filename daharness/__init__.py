@@ -20,6 +20,24 @@ from pathlib import Path
 # as a script, which imports these submodules via absolute import).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Load .env before any submodule import. daharness/registry.py bakes
+# OLLAMA_BASE_URL into a module-level constant at import time, so os.environ
+# must already be populated the moment this package is first touched —
+# whichever entry point that is. bootstrap.py historically imported
+# `daharness` before its own load_dotenv(), pinning the secretary + embeddings
+# to the localhost fallback for the whole process; `python -m daharness.core`
+# never loaded .env at all. override=False on purpose: fill gaps only, never
+# stomp variables the caller (or a test) already set — bootstrap.py keeps
+# override=True for its authoritative-.env semantics. Broad except mirrors
+# bootstrap.py: a root-0600 .env PermissionErrors for non-root callers;
+# tests stub the dotenv module anyway.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except Exception:
+    pass
+
 # Re-export httpx so callers (and tests) can monkeypatch the shared module
 # object via `daharness.httpx`. registry.py imports the same `httpx` module, so
 # patching `daharness.httpx.AsyncClient` is seen by ToolRegistry._embed_text.

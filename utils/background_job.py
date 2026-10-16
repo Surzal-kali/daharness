@@ -48,21 +48,36 @@ _MAX_JOBS = 64
 _JOBS: "Dict[str, Dict[str, Any]]" = {}
 _JOBS_LOCK = threading.Lock()
 
-# Default log directory for per-job output.
-_LOG_DIR = os.getenv("BG_JOB_LOG_DIR", "/tmp")
+# Default log directory for per-job output.  Read PER CALL everywhere (see
+# launch_job/_reconstruct_job/_find_job_tool): tests set $BG_JOB_LOG_DIR just
+# before importing the tool modules and the import-time capture bug (a1fae22
+# regression) is why the hashfile-survives tests fail in full-suite order.
+# This constant is only the fallback when the var is unset at call time.
+_LOG_DIR_FALLBACK = "/tmp"
+
+
+def _log_dir() -> str:
+    """Return the log dir per call: $BG_JOB_LOG_DIR when set, else /tmp.
+
+    Read at CALL time, never cached at import — a module that imported this
+    one earlier (test order, plugin load order) must not pin a stale dir.
+    """
+    return os.getenv("BG_JOB_LOG_DIR", "").strip() or _LOG_DIR_FALLBACK
+
 
 # Verdict-parser registry.  Each tool module registers its log-text parser
-# here at import time so the generic ``job_status`` tool can apply the right
-# parser even when the job isn't in this process's ``_JOBS`` (e.g. after a
-# Brain restart or from a different lane).  Keyed by ``tool_name`` — the
-# same value passed to ``launch_job(..., tool_name=...)`` and stored in the
-# disk sidecar's ``"tool"`` field.
+# here at import time so jobs launched in one process can be polled with
+# parseable verdicts after the originating closure is unavailable (e.g. the
+# job entry was evicted from ``_JOBS`` and poll_job fell back to a disk
+# sidecar reconstruction).  Keyed by ``tool_name`` — the same value passed
+# to ``launch_job(..., tool_name=...)`` and stored in the disk sidecar's
+# ``"tool"`` field.
 _VERDICT_PARSERS: "Dict[str, Callable[[str], Dict[str, Any]]]" = {}
 _VERDICT_PARSERS_LOCK = threading.Lock()
 
 
 def register_verdict_parser(tool_name: str, parser: Callable[[str], Dict[str, Any]]) -> None:
-    """Register a verdict parser for a tool so ``job_status`` can apply it.
+    """Register a verdict parser for a tool used by ``poll_job`` fallbacks.
 
     Called by tool modules at import time (module-level, after the parser
     function is defined).  The Brain's startup scan imports those modules,
@@ -82,11 +97,11 @@ def _find_job_tool(job_id: str) -> "Optional[str]":
     """Discover the tool name for a job by scanning the log dir for its sidecar.
 
     The disk sidecar is named ``<tool>_<job_id>.meta`` and contains a
-    ``"tool"`` field.  We scan ``_LOG_DIR`` for any file matching
+    ``"tool"`` field.  We scan the log dir for any file matching
     ``*_<job_id>.meta``, read the ``tool`` field, and return it.  This lets
-    ``job_status`` work even when the job isn't in this process's ``_JOBS``.
+    a poller find a job even when it isn't in this process's ``_JOBS``.
     """
-    log_dir = _LOG_DIR
+    log_dir = _log_dir()
     try:
         candidates = [
             os.path.join(log_dir, f)
@@ -145,7 +160,7 @@ def launch_job(
         ``{"job_id", "status": "running", "log_file", "tool", "started",
         "message"}`` — the caller hands ``job_id`` to its poll function.
     """
-    log_dir = log_dir or _LOG_DIR
+    log_dir = log_dir or _log_dir()
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     job_id = uuid.uuid4().hex[:8]
@@ -322,8 +337,8 @@ def poll_job(job_id: str, *, tool_name: str = "") -> Dict[str, Any]:
 
     # Tool-specific verdict parsing.  Try the entry's own parser first
     # (the live closure set at launch time); if the entry was reconstructed
-    # from disk (no parser), fall back to the registry so the generic
-    # ``job_status`` tool still gets parsed verdicts across restarts.
+    # from disk (no parser), fall back to the registry so tools polled
+    # across restarts still get parsed verdicts.
     parser = entry.get("verdict_parser")
     if not callable(parser):
         tool = entry.get("tool", "")
@@ -371,7 +386,7 @@ def _read_log(path: str) -> str:
 
 def _reconstruct_job(job_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
     """Rebuild a job entry from the disk sidecar after a restart."""
-    meta_path = os.path.join(_LOG_DIR, f"{tool_name}_{job_id}.meta")
+    meta_path = os.path.join(_log_dir(), f"{tool_name}_{job_id}.meta")
     try:
         with open(meta_path) as f:
             meta = json.load(f)
@@ -386,7 +401,7 @@ def _reconstruct_job(job_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
         "job_id": job_id,
         "tool": meta.get("tool", tool_name),
         "command": meta.get("command", []),
-        "log_file": meta.get("log_file", os.path.join(_LOG_DIR, f"{tool_name}_{job_id}.log")),
+        "log_file": meta.get("log_file", os.path.join(_log_dir(), f"{tool_name}_{job_id}.log")),
         "meta_file": meta_path,
         "started": meta.get("started", time.time()),
         "cap": meta.get("cap", 1800.0),

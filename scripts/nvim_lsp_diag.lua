@@ -3,7 +3,7 @@
 -- Run it INSIDE the buffer that should resolve tool aliases (e.g. the F2 cell,
 -- root or kali, whatever session is actually failing):
 --
---     :lua dofile("/home/kali/github/stuff/scripts/nvim_lsp_diag.lua")
+--     :lua dofile("/home/kali/github/daharness/scripts/nvim_lsp_diag.lua")
 --
 -- Prints DIAG: lines. Nothing is mutated (no buffer writes, no config changes).
 -- Paste the DIAG lines back verbatim — every branch below names a distinct fix.
