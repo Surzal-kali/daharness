@@ -60,6 +60,9 @@ cd daharness
 python -m venv venv && source venv/bin/activate
 pip install -e .
 cp .env.example .env          # set: OLLAMA_BASE_URL, SECRETARY_MODEL
+cd ../dockered
+docker compose up -d
+cd ../daharness
 python -m daharness.core      # index the tool registry
 python bootstrap.py           # chat with the secretary
 
