@@ -147,8 +147,9 @@ services:
     # 172.28.0.0/24). It serves kali's /etc/hosts lab entries so notebook
     # resolution matches the host; Docker's embedded resolver (127.0.0.11)
     # still stays in charge of container names on the workbench network.
-    # dnsmasq config: kali's /etc/dnsmasq.d/lab.conf (order-after-docker
-    # systemd drop-in included — see git history / dnsmasq setup notes).
+    # dnsmasq config: kali's /etc/dnsmasq.d/lab.conf — reprovisioned by
+    # dockered/lab-dns-setup.sh (idempotent; also writes the
+    # After=docker.service systemd drop-in). Design notes: knowledge/lab-dns.md.
     dns:
       - 172.28.0.1
     volumes:
