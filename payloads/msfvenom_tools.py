@@ -106,7 +106,9 @@ def _tail(text: str, limit: int = _STDERR_TAIL) -> str:
 
 @framework_tool(
     "Browse msfvenom's catalog: payloads, output formats, encoders, "
-    "platforms, or architectures, filtered by a substring query. Use this "
+    "platforms, or architectures, filtered by a substring query. Also knows "
+    "--encrypt methods for generate_payload's encrypt= param (AES/RC4/XOR "
+    "shellcode). Use this "
     "BEFORE generate_payload whenever unsure of an exact name — msfvenom "
     "refuses misspelled payloads/formats with a plain 'Invalid Payload "
     "Selected'. kind='payloads' shows the payload table (~2600 entries; "
@@ -201,6 +203,9 @@ async def generate_payload(
     badchars: Optional[str] = None,
     platform: Optional[str] = None,
     arch: Optional[str] = None,
+    encrypt: Optional[str] = None,
+    encrypt_key: Optional[str] = None,
+    encrypt_iv: Optional[str] = None,
     extra_options: Optional[Dict[str, Any]] = None,
     start_handler: bool = False,
 ) -> Dict[str, Any]:
@@ -230,6 +235,15 @@ async def generate_payload(
         arch: Explicit architecture (-a x86/x64).
         extra_options: Extra VAR=VALUE payload options appended to the
             command (e.g. {'URI': '/x'}).
+        encrypt: Encrypt the raw shellcode with a real cipher instead of (or
+            alongside) an encoder chunk: 'aes256', 'aes256cbc', 'rc4', 'xor',
+            'base64' etc (msfvenom_menu(kind='encrypt')). Emits ENCRYPTED RAW
+            SHELLCODE ONLY — no decryptor is baked in; pair with a loader from
+            the encoders/ lane.
+        encrypt_key: Cipher key as a hex string (e.g. 32 bytes = 64 hex chars
+            for aes256). Required with encrypt except for 'base64'.
+        encrypt_iv: Initialization vector (hex). Optional; auto-generated when
+            omitted. Valid for aes256cbc.
         start_handler: Also start a persistent exploit/multi/handler job via
             the MSF RPC lane to catch the callback (same payload/LHOST/LPORT).
     """
@@ -334,6 +348,31 @@ async def generate_payload(
         if not _SAFE_TOKEN.match(arch):
             return _fail(f"Invalid arch {arch!r}.")
         argv += ["-a", arch]
+    if encrypt:
+        if not _SAFE_TOKEN.match(encrypt):
+            return _fail(f"Invalid encrypt method {encrypt!r} — see msfvenom_menu(kind='encrypt').")
+        if encrypt != "base64" and not (encrypt_key or "").strip():
+            return _fail(
+                "encrypt_key is required for cipher methods (hex string; e.g. "
+                "aes256 wants 64 hex chars = 32 bytes). base64 needs no key."
+            )
+        argv += ["--encrypt", encrypt]
+        key = (encrypt_key or "").strip()
+        if key:
+            try:
+                bytes.fromhex(key)
+            except ValueError:
+                return _fail(f"Invalid encrypt_key {key!r}: not a hex string.")
+            argv += ["--encrypt-key", key]
+        iv = (encrypt_iv or "").strip()
+        if iv:
+            if iv.lower().startswith("0x"):
+                return _fail("encrypt_iv must be the bare hex bytes, no 0x prefix.")
+            try:
+                bytes.fromhex(iv)
+            except ValueError:
+                return _fail(f"Invalid encrypt_iv {iv!r}: not a hex string.")
+            argv += ["--encrypt-iv", iv]
 
     try:
         DROPBOX_DIR.mkdir(parents=True, exist_ok=True)

