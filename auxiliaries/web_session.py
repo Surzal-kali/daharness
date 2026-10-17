@@ -58,15 +58,19 @@ from constants import framework_tool
 from utils.cookie_jar import extract_csrf_tokens, get_jar
 from utils.gated_http import gated_request
 from utils.scope_gate import ScopeGateError
+from evasion.webshape import HostFloor, sticky_ua
 
-_UA = "framework-web-session/1.0 (+stateful-audit-lane)"
+# UA/pacing moved to evasion/webshape (sticky_ua is per-host deterministic;
+# the old self-identifying marker remains reachable via SESSION_UA=legacy).
 _TOKEN_SCAN_LIMIT = 262144  # extract tokens from at most this much body
 
 
 def _merge_headers(
-    base: Optional[Dict[str, str]], extra: Optional[Dict[str, str]]
+    base: Optional[Dict[str, str]],
+    extra: Optional[Dict[str, str]],
+    host: str = "",
 ) -> Dict[str, str]:
-    merged: Dict[str, str] = {"User-Agent": _UA}
+    merged: Dict[str, str] = {"User-Agent": sticky_ua(host)}
     if base:
         merged.update({str(k): str(v) for k, v in base.items()})
     if extra:
@@ -162,10 +166,12 @@ def _do_session_request(
     if not host:
         raise ScopeGateError(f"scope gate: cannot parse host from URL {url!r}")
 
+    floor_waited = HostFloor.wait(host)
+
     session = requests.Session()
     applied = jar.apply_to_session(session, url)
 
-    merged = _merge_headers(headers, None)
+    merged = _merge_headers(headers, None, host=host)
     injected = None
     if csrf and (method or "").upper() == "POST":
         injected = _csrf_inject(host, data, json_data, merged)
@@ -231,6 +237,8 @@ def _do_session_request(
         "title": _title_of(text),
         "body_length": len(resp.content or b""),
         "body_head": text[: max(0, int(body_limit))],
+        "ua_applied": merged.get("User-Agent", ""),
+        "floor_waited": floor_waited,
     }
     if files:
         # Multipart part names (dict or tuple-shaped files mapping).
@@ -268,6 +276,10 @@ def _session_digest(result: Dict[str, Any]) -> Dict[str, str]:
         )
     if result.get("title"):
         parts.append(f"title: {result['title']}")
+    if result.get("ua_applied"):
+        parts.append(f"ua: {result['ua_applied'][:48]}")
+    if result.get("floor_waited"):
+        parts.append(f"floor waited {result['floor_waited']:.1f}s")
     if result.get("upload"):
         up = result["upload"]
         parts.append(
@@ -318,7 +330,10 @@ def session_get(
             body stays bounded by this; token extraction scans deeper
             internally).
         follow_redirects: Follow 3xx hops (default) or return the 3xx.
-        headers: Extra request headers (dict).
+        headers: Extra request headers (dict). A realistic, sticky per-host
+            User-Agent is applied automatically (evasion/webshape.sticky_ua); pass
+            headers={'User-Agent': ...} to override; SESSION_UA env forces a fixed
+            identity (RoE-mandated self-identification).
     """
     return _do_session_request(
         "GET", url,
@@ -375,7 +390,10 @@ def session_post(
         body_limit: Characters of body returned as ``body_head``.
         follow_redirects: Follow the post-login 302 (default) — set False
             to inspect the raw 3xx.
-        headers: Extra request headers (dict).
+        headers: Extra request headers (dict). A realistic, sticky per-host
+            User-Agent is applied automatically (evasion/webshape.sticky_ua); pass
+            headers={'User-Agent': ...} to override; SESSION_UA env forces a fixed
+            identity (RoE-mandated self-identification).
     """
     return _do_session_request(
         "POST", url,
@@ -497,7 +515,10 @@ def session_upload(
         body_limit: Characters of body to return as ``body_head``.
         follow_redirects: Follow the post-upload 3xx (default) or inspect
             the raw redirect.
-        headers: Extra request headers (dict).
+        headers: Extra request headers (dict). A realistic, sticky per-host
+            User-Agent is applied automatically (evasion/webshape.sticky_ua); pass
+            headers={'User-Agent': ...} to override; SESSION_UA env forces a fixed
+            identity (RoE-mandated self-identification).
     """
     import hashlib
     import mimetypes

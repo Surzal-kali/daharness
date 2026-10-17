@@ -99,6 +99,7 @@ ALLOWED_TOOL_ROOTS = [
     (WORKSPACE_ROOT / "listeners").resolve(),
     (WORKSPACE_ROOT / "utils").resolve(),
     (WORKSPACE_ROOT / "encoders").resolve(),
+    (WORKSPACE_ROOT / "evasion").resolve(),
 ]
 
 
