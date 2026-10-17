@@ -118,6 +118,11 @@ here is built around:
   stack; `msfvenom_menu` browses payloads/formats/encoders by substring
   query; `list_dropbox` recovers artifacts from earlier turns when the
   `out_path` was lost.
+- **`encrypt` / `encrypt_key` / `encrypt_iv`** invoke msfvenom's real-cipher
+  `--encrypt` (aes256, aes256cbc, rc4, xor, base64; key/IV hex-validated
+  before the binary runs, exact names via `msfvenom_menu(kind='encrypt')`).
+  Emits ENCRYPTED RAW SHELLCODE only — the decrypt-and-execute wrapper is the
+  `encoders/` loader lane's job, so pair the artifacts or they just sit there.
 - **Meterpreter payloads are hard-blocked, mirroring `dispatch_metasploit`**
   — the in-framework handler lane can never catch their callback
   (AutoLoadExtensions serialization). Pure shell payloads only.

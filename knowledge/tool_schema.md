@@ -310,7 +310,7 @@ function name, not the kernel bare name.
 
 | tool_id | alias | params | notes |
 |---|---|---|---|
-| `run_nmap` | `nmap` | `target` (req), `options` ("-Pn -sV") | `net.raw` |
+| `run_nmap` | `nmap` | `target` (req), `options` ("-Pn -sV"), `shaping` (None) | `net.raw`; shaping preset from `evasion/shaping.py` (quiet/polite/noisy; decoy/fragment lab-gated) |
 | `nmap_status` ¶ | auto | `job_id` (req) | `net.raw`; digest adapter |
 | `nmap_scripts` | auto | `query` (""), `category` (""), `detail` (False), `limit` (40) | `net.raw` |
 
@@ -393,6 +393,11 @@ curated alias for the deleted `run_web_probe` wrapper).
 | `probe_web` | `targets` (req), `ports` ("80,443,8080,8443"), `insecure` (False), `timeout` (5.0), `threads` (48), `wall_cap` (90.0) | `recon.web`, `web.probe` |
 
 ## auxiliaries/web_session.py — stateful HTTP lane (cookie jar + CSRF)
+
+Every `session_*` call carries a realistic, sticky per-host User-Agent from
+`evasion/webshape.py` (caller `headers={'User-Agent': ...}` wins;
+`SESSION_UA` env overrides; legacy marker via `SESSION_UA=legacy`). Optional
+per-host pacing floor via `SESSION_HOST_FLOOR`.
 
 | tool_id | alias | params | tags |
 |---|---|---|---|
@@ -493,7 +498,7 @@ Kernel bare names: `msf_dispatch`, `msf_index`, `msf_set_payload`,
 | tool_id | alias | params | tags |
 |---|---|---|---|
 | `msfvenom_menu` | `msfvenom_menu` | `kind` ("payloads"), `query` ("") | `exploit.msf` |
-| `generate_payload` | `msfvenom` | `payload` (None), `lhost` (""), `lport` (0 int), `preset` (None), `format` (None), `out_name` (None), `encoder` (None), `iterations` (1 int), `badchars` (None), `platform` (None), `arch` (None), `extra_options` (None dict), `start_handler` (False) | `exploit.msf` |
+| `generate_payload` | `msfvenom` | `payload` (None), `lhost` (""), `lport` (0 int), `preset` (None), `format` (None), `out_name` (None), `encoder` (None), `iterations` (1 int), `badchars` (None), `platform` (None), `arch` (None), `encrypt` (None: aes256/aes256cbc/rc4/xor/base64), `encrypt_key` (None hex), `encrypt_iv` (None hex), `extra_options` (None dict), `start_handler` (False) | `exploit.msf`; `--encrypt` emits encrypted RAW shellcode only — pair with an `encoders/` loader |
 | `list_dropbox` | `list_dropbox` | none | `exploit.msf` |
 
 ## payloads/searchsploiting.py, payloads/sqlmap.py, payloads/wordlists.py

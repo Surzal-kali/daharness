@@ -99,6 +99,8 @@ lives beside its code:
   result projection, scratch store, findings, tool budget, cookie jar
 - [`listeners/README.md`](listeners/README.md) — the Brain sidecar, OOB
   collaborator, in-process fallback, zombie kill switch
+- [`evasion/README.md`](evasion/README.md) — readiness lane: nmap wire-shaping
+  presets + sticky per-host web fingerprint policy (and their honest limits)
 - [`dockered/README.md`](dockered/README.md) — the containerized workbench
   (ChromaDB + Open WebUI + JupyterLab)
 - [`dabooks/README.md`](dabooks/README.md) — the JupyterLab notebook lane
@@ -170,7 +172,8 @@ resolved via `constants.brain_socket_path()` — the socket lives inside the
 tree so bind-mounted container lanes such as the jupyter kernel reach the
 SAME socket as the host; a `/tmp` path would be per-namespace and unreachable
 across a container boundary) with length-prefixed message
-framing. At startup it scans `auxiliaries/`, `listeners/`, and `payloads/`
+framing. At startup it scans the six indexed roots (`auxiliaries/`, `payloads/`,
+`listeners/`, `utils/`, `encoders/`, `evasion/`)
 for `@framework_tool` callables and primes its function registry before
 binding the socket. It dispatches `CALL_TOOL` events to registered Python
 functions, and forwards unknown events to a C library (`frameit.so`) via
@@ -197,11 +200,13 @@ becomes the semantic capability description that the registry embeds.
 
 ## Tool Modules
 
-150+ tools live in four indexed roots: [`auxiliaries/`](auxiliaries/README.md)
+150+ tools live in six indexed roots: [`auxiliaries/`](auxiliaries/README.md)
 (scanners, recon, the scope integration), [`payloads/`](payloads/README.md)
 (offensive lanes: MSF, msfvenom, fuzzing, cracking), [`utils/`](utils/README.md)
-(harness plumbing: scope gate, projection, scratch, findings), and
-[`listeners/`](listeners/README.md) (Brain sidecar services, OOB collaborator).
+(harness plumbing: scope gate, projection, scratch, findings),
+[`listeners/`](listeners/README.md) (Brain sidecar services, OOB collaborator),
+plus the readiness lanes [`evasion/`](evasion/README.md) (wire-shaping +
+fingerprint policy; `encoders/` loaders are staged but not yet built).
 Each folder README carries the per-module inventory and that lane's deep dive.
 
 ### Tool Categories (`daharness/tool_tags.py`)
