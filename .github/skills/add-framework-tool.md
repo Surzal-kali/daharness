@@ -9,7 +9,7 @@ Pick the tool type based on what the tool does. High-level logic, networking, co
 
 ## Option A — argparse module (LOCAL_FILE transport)
 
-1. Create a `.py` file under an allowed root: `auxiliaries/`, `payloads/`, `listeners/`, `utils/`, `encoders/`.
+1. Create a `.py` file under an allowed root: `auxiliaries/`, `payloads/`, `listeners/`, `utils/`, `encoders/`, `evasion/`.
 2. Add a module-level docstring — this becomes the embedding text for vector search, so write it descriptively.
 3. Use `argparse` with `add_argument` calls — the static AST scanner extracts flags, types, and required-ness into the parameter schema.
 4. Re-index: `python -m daharness.core` (or `--clear` to wipe first).

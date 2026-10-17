@@ -51,7 +51,7 @@ The `daharness/` package splits imports across focused modules:
 ### Tool Discovery (`daharness/registry.py:discover_local_tools`)
 
 Two passes scan `ALLOWED_TOOL_ROOTS` (`auxiliaries/`, `payloads/`,
-`listeners/`, `utils/`, `encoders/`):
+`listeners/`, `utils/`, `encoders/`, `evasion/`):
 
 1. **Static AST analysis** (`LOCAL_FILE` transport): `extract_module_profile()`
    parses each `.py` with `ast` — **never imports** — extracting the module
@@ -409,6 +409,42 @@ handler cleanup instead of the "No new sessions detected" mask; msfvenom
 generation is offline compute (not gated) while `session_upload` and the
 trigger `session_get` are per-hop scope-gated.
 
+### Evasion lane (`evasion/`)
+
+`evasion/` holds shaping policy + resolvers **consumed by** scanner and web
+tools — it is tool-discoverable (in `ALLOWED_TOOL_ROOTS`) but its shipped
+modules are plain resolvers, not `@framework_tool` entry points, and it never
+contacts targets itself. `shaping.py:resolve(preset, options)` returns merged
+nmap flag lists from wire-traffic presets: `quiet` / `polite` / `noisy` are
+live-safe pacing; `decoy` / `fragment` are `lab_only` and refuse unless
+`SHAPING_LAB_MODE=1` (`.env`). Consumed via
+`run_nmap(target, options, shaping=)` (`auxiliaries/nmap.py`): preset flags go
+in FRONT of operator `options`, and nmap honors the last repeated flag, so
+explicit operator flags always win over preset values. `-T` templates tune the
+scanner's own speed/accuracy trade, not the wire — real shaping is
+`--max-rate` / `--scan-delay` / `--data-length`.
+
+`webshape.py` supplies the stateful HTTP lane's fingerprint identity.
+`sticky_ua(host)` is a deterministic per-host pick from a realistic browser
+pool — pure hash, zero state, restarts-safe; the same host always sees the
+same agent, and rotation-within-host is deliberately NOT provided
+(authenticated servers bind sessions to fingerprints). `SESSION_UA` env
+overrides the pick (`legacy` restores the old self-identifying
+`framework-web-session/1.0` marker for RoE-mandated identification).
+`HostFloor` paces per-host repeats via `SESSION_HOST_FLOOR` (seconds, clamped
+≤15). Both are applied at web_session's single choke point
+(`_merge_headers` / `_do_session_request`); caller-supplied
+`headers={'User-Agent': ...}` always win over the pool pick.
+
+`payloads/msfvenom_tools.py:generate_payload` gained `encrypt` /
+`encrypt_key` / `encrypt_iv` (aes256/aes256cbc/rc4/xor/base64; key+iv
+hex-validated before any subprocess; exact cipher names come from
+`msfvenom_menu(kind='encrypt')`). It emits **encrypted raw shellcode only** —
+no decryptor stub, no wrapper. The pairing artifact is an `encoders/` loader
+(decrypt + execute at runtime, staged lane); until one exists, an encrypted
+blob alone is inert. Readiness framing, honest taxonomy, and expansion policy
+live in [`evasion/README.md`](evasion/README.md).
+
 ### Open WebUI Tool (`owui-tools/owui-wrapper.py` → `owui_tools.framework_bridge`)
 
 Open WebUI tool definitions (v0.3.2) that call the framework API for tool
@@ -450,7 +486,7 @@ the field is at the top level or nested under `result`.
 
 **Option A — argparse module (LOCAL_FILE):**
 1. Create a `.py` file under an allowed root (`auxiliaries/`, `payloads/`,
-   `listeners/`, `utils/`, `encoders/`).
+   `listeners/`, `utils/`, `encoders/`, `evasion/`).
 2. Add a module-level docstring (this becomes the embedding text).
 3. Use `argparse` with `add_argument` calls — the static scanner extracts
    flags, types, and required-ness into the parameter schema.
