@@ -60,9 +60,9 @@ cd daharness
 python -m venv venv && source venv/bin/activate
 pip install -e .
 cp .env.example .env          # set: OLLAMA_BASE_URL, SECRETARY_MODEL
-cd ../dockered
+cd dockered
 docker compose up -d
-cd ../daharness
+cd ..
 python -m daharness.core      # index the tool registry
 python bootstrap.py           # chat with the secretary
 
@@ -87,10 +87,28 @@ check [`AGENTS.md`](AGENTS.md) pitfalls or open an issue.
 
 ## The rest of this README
 
-The sections below are the deep architecture reference — tool discovery, the
-Brain sidecar, transports, the approval loop, all env knobs, and the legal
-addendum. Written for operators and contributors.
-Contributor walkthrough: [`CONTRIBUTING.md`](.github/CONTRIBUTING.md).
+This document is the project overview and harness-wide reference — identity,
+quick start, core architecture, configuration, safety. Each lane's deep dive
+lives beside its code:
+
+- [`auxiliaries/README.md`](auxiliaries/README.md) — recon & access lanes:
+  ZAP, the Playwright sidecar, program scope, the stateful HTTP lane
+- [`payloads/README.md`](payloads/README.md) — offensive lanes: Metasploit
+  client deep-dive, the msfvenom/upload chain, fuzzers, cracking
+- [`utils/README.md`](utils/README.md) — harness plumbing: scope gate,
+  result projection, scratch store, findings, tool budget, cookie jar
+- [`listeners/README.md`](listeners/README.md) — the Brain sidecar, OOB
+  collaborator, in-process fallback, zombie kill switch
+- [`dockered/README.md`](dockered/README.md) — the containerized workbench
+  (ChromaDB + Open WebUI + JupyterLab)
+- [`dabooks/README.md`](dabooks/README.md) — the JupyterLab notebook lane
+- Drop folders & operator docs: [`dropbox/README.md`](dropbox/README.md),
+  [`apk/README.md`](apk/README.md), [`pcaps/README.md`](pcaps/README.md),
+  [`binaries/README.md`](binaries/README.md),
+  [`knowledge/README.md`](knowledge/README.md)
+
+Agent-facing development guide: [`AGENTS.md`](AGENTS.md). Contributor
+walkthrough: [`CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
 ## Architecture
 
@@ -113,7 +131,7 @@ The core of the framework. A local LLM (Ollama; `SECRETARY_MODEL`, default
    (`POST_EXECUTION_LOGS`: `off` | `failures` | `always`, default
    `failures`), and the result passes through the projection middleman
    before it enters context (see
-   [Result Projection](#result-projection-utilsresult_projectionpy)).
+   [Result Projection](utils/README.md#result-projection-result_projectionpy)).
 
    This gate is internal to the secretary lane — tool calls that arrive
    through the API gateway or the MCP endpoint skip it entirely.
@@ -160,7 +178,9 @@ functions, and forwards unknown events to a C library (`frameit.so`) via
 
 When the Brain is unavailable, `BRAIN_DISPATCH` tools fall back to in-process
 execution with cached class instances (so stateful clients like
-`MetasploitClient` keep their handles).
+`MetasploitClient` keep their handles). Full startup sequence, event
+protocol, timeout/shutdown semantics, and the zombie kill switch:
+[`listeners/README.md`](listeners/README.md#brain-sidecar-thebrainpy).
 
 ### `@framework_tool` Decorator (`constants.py`)
 
@@ -177,51 +197,12 @@ becomes the semantic capability description that the registry embeds.
 
 ## Tool Modules
 
-- **`auxiliaries/program_scope.py`** — **BRAIN_DISPATCH**: HackerOne scope integration: load program scope, check_scope, check_reportable, program_hacktivity
-- **`auxiliaries/impacket_suite.py`** — **BRAIN_DISPATCH**: Impacket post-exploitation: SMB enum/read, secretsdump, psexec/wmiexec/atexec
-- **`auxiliaries/ssh_exec.py`** — **BRAIN_DISPATCH**: SSH batch command execution on a persistent connection
-- **`auxiliaries/smb_scanner.py`** — **BRAIN_DISPATCH**: SMB null session vulnerability scanning
-- **`auxiliaries/cert_tools.py`** — **BRAIN_DISPATCH**: TLS certificate generation/clearing for the OOB collaborator
-- **`auxiliaries/archived_urls.py`** — **BRAIN_DISPATCH**: Passive archived-URL discovery via the Wayback Machine CDX API (bounty-relevant triage: interesting files, parameterized URLs)
-- **`auxiliaries/cors_probe.py`** — **BRAIN_DISPATCH**: CORS posture + security-header audit (attacker-controlled `Origin` reflection and `null`-origin checks) via the per-hop scope-gated HTTP client
-- **`auxiliaries/db_client.py`** — **BRAIN_DISPATCH**: Direct-database connect + enumerate with KNOWN credentials (MySQL via pymysql, PostgreSQL via pg8000) — deliberately not the injection lane, which is sqlmap's
-- **`auxiliaries/dns_lookup.py`** — **BRAIN_DISPATCH**: Forward/reverse DNS resolution feeding the scope workflow (IP blessing; not scope-gated — it never touches the target)
-- **`auxiliaries/ftp_recon.py`** — **BRAIN_DISPATCH**: FTP/SFTP recon and transfer (banner, anonymous check, listings, authenticated get/put)
-- **`auxiliaries/framework_status.py`** — **BRAIN_DISPATCH**: Framework operational health check (Brain, Ollama, ChromaDB, ZAP, findings DB)
-- **`auxiliaries/playwright_recon.py`** — **BRAIN_DISPATCH**: Scope-gated rendered-DOM recon (client for the Playwright sidecar)
-- **`auxiliaries/playwright_sidecar.py`** — **Service**: Headless-Chromium sidecar enforcing the operator-armed scope gate at the browser request-routing layer (opt-in via `PLAYWRIGHT_SIDECAR=1`)
-- **`auxiliaries/ssrf_probe.py`** — **BRAIN_DISPATCH**: Parametric SSRF fuzzer that grades responses and out-of-band callbacks (optionally the collaborator's public redirect endpoint)
-- **`auxiliaries/tls_info.py`** — **BRAIN_DISPATCH**: TLS certificate + protocol posture inspection (subject/SANs, versions, ciphers, expiry runway)
-- **`auxiliaries/web_login_brute.py`** — **BRAIN_DISPATCH**: Session-aware web-login brute-forcing for CSRF-protected form endpoints (token reuse per session)
-- **`auxiliaries/web_probe.py`** — **BRAIN_DISPATCH**: Concurrent web-surface prober — turns open ports into live HTTP intel (status, title, stack fingerprints) in one envelope
-- **`auxiliaries/web_session.py`** — **BRAIN_DISPATCH**: Stateful HTTP lane — `session_get`/`session_post`/`session_request`/`session_upload` carry cookies + CSRF tokens from the universal jar through every scope-gated hop (Django-style login flows end-to-end; `session_upload` is the multipart delivery step of the msfvenom lane; see [Universal Cookie Jar](#universal-cookie-jar-utilscookie_jarpy))
-- **`payloads/metasploiting.py`** — **BRAIN_DISPATCH / MCP_RPC**: Metasploit module search, execution, session polling, interaction
-- **`payloads/msfvenom_tools.py`** — **BRAIN_DISPATCH**: msfvenom payload generation into `dropbox/` (presets per target stack, menu browser, artifact listing) — the file-upload lane's step 1; `start_handler=True` starts the catch listener
-- **`payloads/ffuf.py`** — **BRAIN_DISPATCH**: ffuf web fuzzing: directories, files, vhosts, parameters (launch/poll/cancel)
-- **`payloads/hydra.py`** — **BRAIN_DISPATCH**: Hydra credential brute-force / password-spray (launch/poll/cancel)
-- **`payloads/sqlmap.py`** — **BRAIN_DISPATCH**: sqlmap SQL injection detection (launch/poll with injectable verdict parsing)
-- **`payloads/searchsploiting.py`** — **BRAIN_DISPATCH**: searchsploit (ExploitDB) lookup for known exploits
-- **`payloads/fastcgi.py`** — **BRAIN_DISPATCH**: FastCGI/PHP-FPM exploitation (raw request + php://input RCE chain)
-- **`payloads/hash_crack.py`** — **BRAIN_DISPATCH**: john the Ripper + hashcat password cracking (hash-string mode suggestion; `run_*`/`*_status`/`*_show` background-job triplets)
-- **`payloads/js_recon.py`** — **BRAIN_DISPATCH**: Static JavaScript recon — API routes and secrets extracted from pages and bundles (no browser, no heavy deps)
-- **`payloads/wordlists.py`** — **BRAIN_DISPATCH**: Query-based wordlist discovery over the source tree including Kali's symlinked folders (feeds ffuf/hydra)
-- **`utils/findings.py`** — **BRAIN_DISPATCH**: Report, render, close, and supersede structured security findings
-- **`utils/paramiko_client.py`** — **BRAIN_DISPATCH**: Persistent SSH (connect/exec/shell/close) + one-shot mode
-- **`utils/packetcraft.py`** — **BRAIN_DISPATCH**: Scapy packet crafting: craft_*(icmp/tcp/udp/arp/vlan/dhcp/dns/mdns/http), send_packet, send_and_receive_packet (sr1/srp1: fires a probe and captures its reply in one gated call), sniff_packets, dissect_packet, modify_packet, save/load pcap, **pcap forensic lane** (save_pcap, sniff_to_pcap, load_pcap, list_pcaps — batch save/load/list with `pcaps/` gitignored output dir, mirroring the msfvenom dropbox pattern)
-- **`utils/log_reader.py`** — **BRAIN_DISPATCH**: Read/stream Brain and MSF logs
-- **`utils/memory_tools.py`** — **BRAIN_DISPATCH**: Namespaced vector memory (remember_text/recall_text)
-- **`utils/crypto_kit.py`** — **BRAIN_DISPATCH**: Offline crypto/encoding workbench — decode, identify, and attack encoded blobs (Base64/JSON cookies, JWTs, unsalted hashes; zero network)
-- **`utils/cookie_jar.py`** — **BRAIN_DISPATCH**: Universal cookie jar + token vault — durable, cross-process SQLite store of cookies/CSRF tokens/bearer strings every web tool shares (state lives on disk, so the Brain, in-process lane, REPL, and gateway all see the same jar; see [Universal Cookie Jar](#universal-cookie-jar-utilscookie_jarpy))
-- **`utils/gated_http.py`** — **Helper**: Per-hop scope-gated HTTP (closes the 302-to-out-of-scope bypass); used by cors_probe, ssrf_probe, web_probe, js_recon; `gated_get`/`gated_request` accept an optional caller-managed `requests.Session` (the stateful web_session lane rides this hook without changing default stateless behavior)
-- **`utils/scratch_store.py`** — **Store**: Durable, ownership-scoped scratch storage backing digest/page result projection (see [Result Projection](#result-projection-utilsresult_projectionpy))
-- **`utils/background_job.py`** — **Helper**: Shared background-job launch/poll helper for long-running CLI tools
-- **`utils/handles.py`** — **Helper**: Session handle formatting, parsing, and validation
-- **`listeners/listening.py`** — **BRAIN_DISPATCH**: TCP listener with Brain event forwarding
-- **`listeners/collaborator.py`** — **BRAIN_DISPATCH**: OOB callback listener (Burp Collaborator analog): HTTP/HTTPS/DNS on one host
-- **`listeners/raw_scan.py`** — **BRAIN_DISPATCH**: Raw SYN port scanner (C++ plugin via ctypes)
-- **`listeners/brain_control.py`** — **BRAIN_DISPATCH**: Visibility + kill switch for Brain-side tool executions (`list_tool_executions` / `kill_tool_execution`)
-- **`listeners/execution_tracker.py`** — **Brain-side**: Execution tracker state shared with `thebrain.py` (live/tracked executions, zombie kill switch)
-- **`memories.py`** — **BRAIN_DISPATCH**: Namespaced vector memory (remember/search/recall/get/forget)
+150+ tools live in four indexed roots: [`auxiliaries/`](auxiliaries/README.md)
+(scanners, recon, the scope integration), [`payloads/`](payloads/README.md)
+(offensive lanes: MSF, msfvenom, fuzzing, cracking), [`utils/`](utils/README.md)
+(harness plumbing: scope gate, projection, scratch, findings), and
+[`listeners/`](listeners/README.md) (Brain sidecar services, OOB collaborator).
+Each folder README carries the per-module inventory and that lane's deep dive.
 
 ### Tool Categories (`daharness/tool_tags.py`)
 
@@ -253,36 +234,21 @@ surfaces the tagged tools even when the tool's own prose never used that word.
 
 ### Background Job Pattern
 
-Long-running CLI tools (nmap, masscan, amass, ffuf, hydra, sqlmap) use the
-shared `utils/background_job.py` helper: `launch_job` starts a detached
-`subprocess.Popen`, writes a JSON sidecar to disk (so polls survive a
-harness restart), starts a reaper thread for the wall-clock cap, and
-returns a `job_id` immediately — the secretary turn is not held open.
-`poll_job` reads the log, checks liveness, tails recent lines, and returns
-a structured `status: "running" | "done"` dict. Each tool pair follows the
-`run_*` / `*_status` / `*_cancel` shape.
-
-Poll verdicts are bounded: ffuf's parsed findings list is capped at
-`FFUF_MAX_FINDINGS` (default 10000, most interesting status codes kept
-first) because a catch-all target — an app that redirects every path, so
-every wordlist word "hits" — can otherwise produce a verdict larger than
-the Brain's 10 MiB wire-frame guard (`MAX_MESSAGE_SIZE`,
-`listeners/thebrain.py`), and the reply dies on the socket read
-("brain dispatch failed: declared message length ... exceeds max"). The
-true count is reported via `findings_total` / `findings_truncated`, and
-the full result set always remains in the job's `-o` JSON output file
-(`meta.output_file`).
+Long-running CLI tools follow the shared `utils/background_job.py` pattern:
+`launch_job` returns a `job_id` immediately (a detached subprocess + JSON
+sidecar so polls survive a restart) and tools come in
+`run_*` / `*_status` / `*_cancel` triplets. Full mechanics:
+[`utils/README.md`](utils/README.md#background-job-pattern-background_jobpy).
 
 ### C/C++ Plugins
 
-- `listeners/plugins/raw_scan.cpp` → `raw_scan.so` — raw SYN scan using
-  `SOCK_RAW` (requires root or `CAP_NET_RAW`)
-- `listeners/plugins/frameit.c` → `frameit.so` — C-side event bridge for the
-  Brain
-
+- `listeners/plugins/raw_scan.cpp` → `raw_scan.so` — raw SYN scan (`SOCK_RAW`);
+  requires root or `CAP_NET_RAW`
+- `listeners/plugins/frameit.c` → `frameit.so` — C-side event bridge for the Brain
 - `payloads/plugins/listen.cpp` — payload listener stub
 
-Compiled with `-fPIC -shared`; loaded via `ctypes.CDLL`.
+Compiled with `-fPIC -shared`; loaded via `ctypes.CDLL` (always set
+`argtypes` and `restype` explicitly).
 
 ## External Dependencies
 
@@ -310,75 +276,37 @@ is in your `PATH`.
 | **john the Ripper** | `payloads/hash_crack.py` | Password cracking (`run_john` / `john_status` / `john_show`, background-job pattern) |
 | **hashcat** | `payloads/hash_crack.py` | Password cracking (`run_hashcat` / `hashcat_status` / `hashcat_show`, background-job pattern) |
 
-### OWASP ZAP
-
-1. Install ZAP (`sudo apt install zaproxy` on Debian/Ubuntu/Kali — the plain
-   `zap` package name does not resolve — or download from the official
-   site).  Kali's package installs `/usr/bin/zaproxy` / `/usr/bin/owasp-zap`
-   (both wrappers for `/usr/share/zaproxy/zap.sh`); the plain-ZAP layout
-   (`zap` on PATH or `/usr/share/zap/zap.sh`) also works. For anything else,
-   set `ZAP_BIN` to the launcher path.
-2. The launcher is resolved automatically in the order: `$ZAP_BIN` → `zap` →
-   `zaproxy` → `owasp-zap` (all PATH) → `/usr/share/zaproxy/zap.sh` →
-   `/usr/share/zap/zap.sh`.
-3. The framework launches ZAP in `-daemon` mode (loopback-only API) and
-   manages its configuration automatically. The home directory is pinned to
-   `.zap_home/` in the workspace root. ZAP is never run as root — the
-   launcher drops to the original user if the framework was started with
-   `sudo`. The ZAP *browser-proxy* listener binds `ZAP_PROXY_BIND`
-   (default `0.0.0.0`) for upstream proxying; only the daemon's API is
-   restricted to loopback.
-4. Set `ZAP_API_KEY` in `.env`; it is sent as the `apikey` query parameter on
-   every API call.
+The full install/launcher-resolution story, the daemon configuration, and
+the proxy/bind posture live in
+[`auxiliaries/README.md`](auxiliaries/README.md#owasp-zap). Short version:
+install `zaproxy` (set `ZAP_BIN` if it lands elsewhere), the framework
+launches ZAP in `-daemon` mode with a loopback-only API, `.zap_home/` pins
+the home directory, and `ZAP_API_KEY` goes in `.env`.
 
 ### Playwright Rendered-DOM Recon Sidecar
 
-The scope-enforcing headless-Chromium sidecar for JS-heavy / SPA recon
-(`auxiliaries/playwright_sidecar.py` + `auxiliaries/playwright_recon.py`).
-It gates **navigations + fetch/XHR/websockets** through the operator-armed
-scope gate at the browser request-routing layer; passive subresources
-(img/css/font/media/script) are allowed from anywhere so pages render.
-
-1. Install the Python package and the Chromium browser binary:
-
-   ```bash
-   ./venv/bin/pip install playwright
-   # IMPORTANT: install the browser INTO THE REPO (gitignored) so the path
-   # is workspace-relative and root can find it. The framework runs as root
-   # (HOME=/root), where the default ~/.cache/ms-playwright is empty.
-   PLAYWRIGHT_BROWSERS_PATH="$(pwd)/.pw-browsers" \
-     ./venv/bin/python -m playwright install chromium
-   ```
-
-   The browser lands in `.pw-browsers/` (gitignored). The sidecar
-   auto-resolves it from `$WORKSPACE_ROOT/.pw-browsers` (falling back to
-   this module's repo root) and sets `PLAYWRIGHT_BROWSERS_PATH` at import —
-   so it works whether the framework was launched as root or your user.
-2. The framework runs as root, so Chromium is launched with `--no-sandbox`
-   (the setuid sandbox cannot run as root and would hang the launch).
-   Sandbox isolation is kept when running non-root (lab/dev).
-3. Enable the sidecar at launch with `PLAYWRIGHT_SIDECAR=1` (off by
-   default). Tools: `playwright_fetch` (one-shot rendered-DOM envelope),
-   `playwright_crawl` / `playwright_crawl_status` /
-   `playwright_crawl_stop` (bounded launch/poll crawl). If the sidecar is
-   down, the tools return a clear "not reachable" error — never a faked
-   result. `challenge_detected` flags Cloudflare-class interstitials
-   honestly (vanilla only — no stealth patches).
-4. Auth'd crawling: set `PLAYWRIGHT_STORAGE_STATE` to a Playwright
-   `storageState` JSON path (env / deploy-time injection only — never a
-   tool argument).
+A scope-enforcing headless-Chromium sidecar for JS-heavy / SPA recon —
+gates navigations + fetch/XHR/websockets through the operator-armed scope
+gate at the browser request-routing layer. Opt-in with `PLAYWRIGHT_SIDECAR=1`.
+The full install instructions (browser-into-repo, root/no-sandbox handling,
+`playwright_fetch` / crawl tools, auth'd crawling via
+`PLAYWRIGHT_STORAGE_STATE`) live in
+[`auxiliaries/README.md`](auxiliaries/README.md#playwright-rendered-dom-recon-sidecar).
 
 ### Metasploit Framework
 
-1. Install Metasploit Framework.
-2. Set `MSGRPC_PASSWORD` and `MSF_RPC_PORT` in `.env`.
-3. `bootstrap.py` starts the MSF MCP sidecar (`msfrpcd`) automatically and
-   vectorizes discovered modules into the tool registry.
+Install Metasploit Framework, set `MSGRPC_PASSWORD` and `MSF_RPC_PORT` in
+`.env`, and `bootstrap.py` starts the `msfrpcd` sidecar automatically and
+vectorizes discovered modules into the tool registry. The client deep-dive
+(payload-family rules, the meterpreter hard-block, `start_handler`
+semantics, LHOST reachability) lives in
+[`payloads/README.md`](payloads/README.md#metasploit-framework).
 
 ### Docker deployment (`dockered/`)
 
-A containerized workbench lives in `dockered/` and bind-mounts the live
-source tree (code edits on the host need no rebuild). Start with:
+A containerized workbench (ChromaDB + Open WebUI + JupyterLab on a shared
+bridge network) lives in `dockered/` and bind-mounts the live source tree —
+code edits on the host need no rebuild. Start with:
 
 ```bash
 cd dockered
@@ -386,37 +314,9 @@ docker rm -f chroma          # remove a legacy standalone chroma container if pr
 docker compose up -d --build
 ```
 
-Services:
-
-| Service | Host port | Notes |
-| --- | --- | --- |
-| ChromaDB (`chroma`) | `9000` | Reuses the existing `chroma-data/` volume |
-| Open Terminal | `8000` | Codebase workbench: agent shell + file browser; hosts the framework gateway + Brain sidecar |
-| Open WebUI | `3000` | Chat front end; calls the framework via the tool wrappers in `owui-tools/` |
-
-**Open Terminal** is the codebase workbench. The framework source is
-bind-mounted at `/opt/framework` (host `..` → container). The
-Dockerfile (`dockered/open-terminal.Dockerfile`) bakes in the Python venv,
-Go-built CLI tools (ffuf, amass), radare2, jadx, searchsploit, and
-apt-available security tools; the framework source is never copied.
-
-**Open WebUI** is the chat front end. It reaches the framework through the
-Open WebUI tool wrappers in `owui-tools/owui-wrapper.py` (v0.3.2): five
-tools — `framework_search_tools`, `framework_run_tool`,
-`framework_scratch_search`, `framework_memory_search`, `framework_health` —
-that call the gateway's `/tools/search`, `/tools/execute`, `/scratch/search`,
-`/memory/search`, and `/health` routes with per-chat session isolation (Brain
-sessions auto-named
-`owui-<model>-<chat>`). Install the wrapper as an Open WebUI tool and point
-its `gateway_url` valve at `http://localhost:6000` (from the host; the
-wrapper default targets `http://open-terminal:6000` from inside the
-`open-webui` container). The approval gate is an internal-harness feature
-and does not exist in this lane — tool calls execute directly through the
-gateway, and the same applies to the MCP server. Add an approval layer in
-your own integrating harness if you need one there.
-
-Keys come from `dockered/.env`: `GATEWAY_API_KEY`,
-`OPEN_TERMINAL_API_KEY`.
+Service map, the JupyterLab nursery setup (nbi config, lab DNS, the
+`daharness` kernel lane), and the Open WebUI wiring are documented in
+[`dockered/README.md`](dockered/README.md).
 
 ## Supporting Services
 
@@ -504,31 +404,13 @@ Launch: `python tool_repl.py` (interactive). One-shot modes:
 `info <tool_id>`, `sweep`, `search <query>`.
 
 Jupyter kernel lane — the notebook/engagement-journal twin of the
-interactive REPL: run `python tool_repl.py --install-kernelspec` once and
-every Jupyter-aware frontend (JupyterLab, VS Code, PyCharm) lists the
-`daharness` kernel in its kernel picker; notebook cells then run on the
-same preloaded namespace (`await session_post(...)`, `tools`,
-`scope_on()`, envelope helpers) against the live Brain session. For a
-detached one-off kernel, `python tool_repl.py --kernel` prints the
-connection file for `jupyter console --existing <file>`; in a terminal it
-exits on Ctrl-C pressed twice within 3s (a single press while a sync cell
-runs interrupts it, exactly like IPython). When the REPL runs
-as root, spawned artifacts are redirected into the desktop user's jupyter
-directories and chowned to them — resolved from `SUDO_UID` or the checkout
-owner, override with `DAHARNESS_KERNEL_OWNER` — so IDEs running as that
-user attach without permission hops. The kernelspec declares
-`interrupt_mode: message`: IDE interrupt buttons never fight the terminal
-signal, sync cells abort with KeyboardInterrupt, and any tool subprocess a
-cell spawned gets the signal via the kernel's process group. Caveat:
-Python 3.14 kernels cannot abort an in-flight `await` mid-call (upstream
-ipykernel behavior, verified against vanilla kernels) — for long-running
-tools lean on the per-tool `*_status`/`*_cancel` jobs and timeout knobs.
-The `.ipynb`
-itself is plain nbformat JSON, so journals open anywhere — but keep
-frontends **local**: cells execute against live targets and tool output
-must not egress to third parties. The kernel lane is a sibling, not a
-replacement: the terminal REPL keeps its prompt_toolkit sugar (Ollama
-ghost text, bottom toolbar, F2 editor) that has no ZMQ equivalent.
+interactive REPL: `python tool_repl.py --install-kernelspec` installs the
+`daharness` kernel; notebook cells run on the same preloaded namespace
+(`await session_post(...)`, envelope helpers) against the live Brain
+session. Kernel conventions and caveats:
+[`dockered/README.md`](dockered/README.md#jupyterlab--the-tool-nursery) and
+[`AGENTS.md`](AGENTS.md#jupyter-kernel-dabooksipynb); the notebook work dir
+is [`dabooks/README.md`](dabooks/README.md).
 
 Interactive commands:
 
@@ -568,65 +450,15 @@ embeddings until that re-embed runs (and the Brain is restarted).
 
 ### Scope Gate — Operator-Armed (`utils/scope_gate.py`)
 
-The armed gate is a technical backstop the OPERATOR arms from the Tool
-REPL — separate from `check_scope` above, which only consults a loaded
-manifest. Arming/disarming is deliberately NOT exposed as an
-`@framework_tool`, so the secretary model has no way to toggle or bypass
-it. When disarmed (the default — lab mode) tools behave exactly as
-before.
-
-    scope on <handle> [--platform P] [--no-strict]   # arm (refuses blind: needs a cached manifest)
-    scope status                                      # armed state, asset counts, manifest age
-    scope add-ip <ip> [<hostname>]                    # bless a resolved in-scope IP (CDN-safe)
-    scope add-host <hostname> <ip>                    # bless a vhost hostname (IP must already be blessed)
-    scope rm-ip <ip> / scope rm-host <hostname>       # revoke blessings; scope list-ips shows the allowlist
-
-Enforcement is file-backed, not in-process: the armed state lives in
-`scope/.armed_packet_scope.json` (atomic writes, mtime-checked on every
-call), so a blessing written from the REPL is authoritative in every
-process — a REPL change takes effect immediately inside a running Brain.
-
-Gated calls fail CLOSED — a block raises `ScopeGateError`, which surfaces
-as `Failed` on both dispatch paths (Brain socket + in-process fallback):
-
-- **`check_send`** — packetcraft `send_packet` / `send_and_receive_packet`:
-  the destination IP extracted from the crafted packet (v4/v6 dst, ARP
-  `pdst`); the check runs BEFORE the probe fires.
-- **`check_scan`** — nmap, masscan, ffuf, hydra, ZAP, impacket/SMB,
-  raw_scan, paramiko SSH, sqlmap, fastcgi, ssh_exec, MSF dispatch:
-  URL / bare host / IP / CIDR / hyphen-range / list shapes; one
-  out-of-scope spec refuses the whole call.
-
-Verdict tiers (first match wins; an out-of-scope match always beats an
-in-scope wildcard):
-
-1. **Operator allowlist** — `scope add-ip` blessings (authoritative,
-   CDN-safe: the operator confirmed the IP belongs to an in-scope host).
-1b. **Operator-blessed hostnames** — `scope add-host <hostname> <ip>` maps a
-   vhost hostname to an ALREADY-blessed IP (for lanes whose connect target
-   is the Host header, e.g. ZAP raw send). The operator asserts the mapping;
-   the gate never resolves DNS for it.
-2. **Manifest match** — the program's typed in-scope assets (DOMAIN/
-   WILDCARD/URL for hostnames, IP/CIDR for IPs).
-3. **Reverse-DNS attribution** — PTR records are attacker-settable, so an
-   in-scope PTR match only auto-allows after forward-confirmation (the
-   PTR name must resolve back to the scanned IP; 2s cap, fail-closed).
-
-Strict mode (default): any unconfirmed target is REFUSED with guidance;
-`--no-strict` warns instead. Broad CIDR/hyphen ranges are allowed only as
-a subnet of an explicit in-scope CIDR asset; otherwise refused — disarm
-(`scope off`) for lab / internal-network work.
-
-Never gated by design: non-routable destinations (broadcast, multicast,
-loopback, link-local, reserved — DHCP/mDNS probes pass), pure-L2 frames
-with no routable IP, receive-only traffic (sniffing, inbound replies), and
-offline tools (crafting/dissecting never touch the wire). Known residual
-surfaces: the gate sees the REQUESTED target only — DNS-resolver traffic
-is out of its view, and redirect-following inside scan binaries is
-handled per-tool (ffuf `-r` is denylist-stripped; ZAP crawls are mirrored
-by `zap_sync_scope`, which puts ZAP itself in protect mode against OOS
-hops; and `utils/gated_http.py` re-validates every redirect hop that the
-HTTP probe tools follow).
+A technical backstop the OPERATOR arms from the Tool REPL — separate from
+`check_scope`, which only consults a loaded manifest. Arming is deliberately
+not exposed as an `@framework_tool`, so the secretary can never toggle it.
+Enforcement is file-backed (`scope/.armed_packet_scope.json`, mtime-checked
+every call), gated calls fail closed with `ScopeGateError`, and an
+out-of-scope match always beats an in-scope wildcard. Full verdict tiers,
+the blessing commands, and known residual surfaces:
+[`utils/README.md`](utils/README.md#scope-gate--operator-armed-scope_gatepy);
+operator usage: [`knowledge/scope_gate.md`](knowledge/scope_gate.md).
 
 ### Memory Service (`memories.py`)
 
@@ -636,77 +468,27 @@ session-scoped filtering. Exposed both as `@framework_tool` methods and via
 the API gateway. The `findings` namespace stores lightweight pointers to
 reported findings.
 
-### Session Manager (`utils/session_manager.py`)
+### Sessions, Cookies, Handles (`utils/`)
 
-Process-local singleton holding live connection objects (SSH clients, MSF
-sessions) keyed by `session_id`. Tools register connections on open and
-retrieve them for follow-up commands without re-authenticating. Includes
-stale-session cleanup.
-
-### Universal Cookie Jar (`utils/cookie_jar.py`)
-
-Almost every web tool in the framework is a stateless one-shot — it makes
-one request and throws away everything the app handed back. Middleware-managed
-state (Django's CSRF dance, session cookies, bearer tokens) therefore blocks
-audits at the front door: you can't even see the authenticated surface
-without carrying `csrftoken` + `csrfmiddlewaretoken` + `sessionid` between
-calls. Cookies and tokens are just strings, so the jar makes that state
-**durable and universal**:
-
-- **SQLite-backed** (`cookie_jar.db`, WAL): state lives on disk, so every
-  lane — Brain sidecar, in-process fallback, REPL, API gateway — sees the
-  same jar without any cross-process broker. Deliberately sidesteps the
-  process-local limitation of the Session Manager.
-- **Cookie jar** (RFC 6265 matching): domain rules honor `Domain=`-style
-  dot-forms, and IP hosts never match dot-forms (a `.56.106` suffix can't
-  leak a cookie onto `192.168.56.106`). Path rules apply when building
-  ready-made `Cookie:` headers for non-jar-aware tools (ffuf/sqlmap/ZAP).
-- **Token vault**: named token strings per host (CSRF form fields, bearer
-  tokens) with latest-wins upsert. `extract_csrf_tokens()` pulls values from
-  hidden inputs, `<meta>` tags, and response headers (Django, Rails,
-  Laravel, ASP.NET canonical order), HTML-unescaped.
-- **Hygiene**: TTL purge (default 72h via `COOKIE_JAR_TTL_HOURS`) plus
-  server-expiry purge on every mutation; `COOKIE_JAR_DB` overrides the path.
-- **Tools**: `jar_state`, `jar_store_cookie` (paste `a=1; b=2` strings),
-  `jar_store_token`, `jar_clear`, `jar_cookie_header`.
-
-The `session_get`/`session_post`/`session_request` lane
-(`auxiliaries/web_session.py`) applies this state through
-`gated_request(session=...)` — every hop still passes the operator-armed
-scope gate. A Django login becomes three plain calls: `session_get /login/`
-(cookie + token captured) → `session_post /login/` with credentials (form
-field + `X-CSRFToken` header auto-injected, `sessionid` captured) →
-`session_get /dashboard/` (authenticated).
-
-### Session Handles (`utils/handles.py`)
-
-Typed session handles (`kind:session_id` strings) that tools declare via
-`@framework_tool(..., accepted_handle_kinds=[...])`. The secretary validates
-any `handle` argument's kind against the tool's accepted set before
-execution, preventing cross-namespace misuse (e.g. passing an SSH handle to
-an MSF tool).
+Three complementary state layers: the **Session Manager** holds live
+connection objects (SSH, MSF) process-locally keyed by `session_id`; the
+universal **cookie jar + token vault** persists web state in SQLite so the
+Brain, in-process lane, REPL, and gateway all share it (it sidesteps the
+Session Manager's process-local pitfall — see
+[`utils/README.md`](utils/README.md#the-universal-cookie-jar--stateful-http-lane-cookie_jarpy));
+typed **session handles** (`kind:session_id`) validate a handle's kind
+against a tool's accepted set before execution. Deep dives:
+[Session Manager](utils/README.md#session-manager-session_managerpy) ·
+[Cookie jar](utils/README.md#the-universal-cookie-jar--stateful-http-lane-cookie_jarpy) ·
+[Session handles](utils/README.md#session-handles-handlespy).
 
 ### OOB Collaborator (`listeners/collaborator.py`)
 
-A Burp Collaborator analog: multi-protocol listener catching blind SSRF,
-blind XSS, and other OOB callbacks. HTTP on TCP 80, HTTPS on TCP 443
-(self-signed cert), and DNS on UDP 53 — all on one host. The payload ID
-rides in the subdomain; `collab_generate` produces a unique callback
-URL/DNS name and `collab_poll` returns correlated events. Requires root for
-ports 80, 443, and 53.
-
-**Public mode** — set `COLLAB_PUBLIC_URL` (e.g. a Tailscale Funnel endpoint
-like `https://<device>.<tailnet>.ts.net`) and `collab_generate` returns
-path-based PUBLIC callback URLs (`<public>/c/<id>/`) instead of lab
-subdomains, and a token-gated redirect endpoint goes live at
-`/r/<id>?to=<url>` → 302 (redirect-to-internal blind SSRF; `scan_ssrf`
-gains a `redirect_to` param for it). Funnel walkthrough: `tailscale funnel
-<COLLAB_HTTP_PORT>` (use 8080 — no root needed), public HTTPS terminates at
-Tailscale and forwards plain HTTP to `127.0.0.1:<COLLAB_HTTP_PORT>`. Honest
-limits: Funnel serves HTTPS only and does not expose DNS-query events, so
-public mode is HTTP-callback-only (subdomain mode keeps the DNS signal).
-Every callback is appended to `scope/collab_hits.jsonl` as durable
-evidence (gitignored); the in-memory store is capped at 5000 entries.
+A Burp Collaborator analog for blind SSRF/XSS callbacks: HTTP/HTTPS/DNS on
+one host, `collab_generate` / `collab_poll`, optional public mode via
+`COLLAB_PUBLIC_URL` (e.g. a Tailscale Funnel) including a token-gated
+redirect endpoint for internal-SSRF chains. Full story:
+[`listeners/README.md`](listeners/README.md#oob-collaborator-collaboratorpy).
 
 ### SQLite Database (`utils/sessions.py`)
 
@@ -736,56 +518,18 @@ harness that wants sign-off needs to add its own layer before calling. If
 (sent as `X-API-Key`); otherwise the gateway runs in unauthenticated dev
 mode.
 
-### Result Projection (`utils/result_projection.py`)
+### Result Projection & Scratch Store (`utils/`)
 
-A middleman between `execute_tool()` and the model's context window:
-`result_mode` is an execution-envelope parameter (passed alongside
-`tool_id`/`arguments`, NOT a tool argument — it never reaches the tool
-body). Three modes:
+Every result passes through the projection middleman *before* entering model
+context: `result_mode` (`digest` | `page` | `full`) is an execution-envelope
+parameter, never a tool argument. Oversized/digested/paged results are
+stored intact in the durable, ownership-scoped **scratch store** and enter
+context as a compact digest/page + a `scratch_ref` + a ready-to-call
+continuation — evidence stays queryable without flooding context. Full
+mechanics: [Projection](utils/README.md#result-projection-result_projectionpy)
+· [Scratch store](utils/README.md#scratch-store-scratch_storepy).
 
-- **`digest`** (default for both the secretary agent and `POST
-  /tools/execute`) — stores the full result in scratch, returns a compact
-  per-tool-family digest + a `scratch_ref` + the retrieval instruction. The
-  model is taught the retrieval move every call. Results smaller than
-  `SCRATCH_SMALL_RESULT_BYTES` (default 2 KiB — handles, verdicts, IDs) pass
-  through in full automatically; only genuinely large outputs (scan logs,
-  hit lists) are projected out.
-- **`full`** — the raw tool result passes through unchanged (also the
-  default on the MCP `tools/call` lane).
-- **`page`** — stores the full result in scratch, returns a bounded page of
-  list results (offset/limit) + a `scratch_ref` + continuation info.
-
-**Why this is not the parked OWUI trim filter:** the projection runs *before*
-the result enters context (not after); the retrieval instruction is part of
-the return (the model never guesses how to get the full output); per-tool-family
-digest logic is honest because the tool knows its own output structure.
-
-**Digest adapter registration:** tools opt in via
-`@framework_tool(..., result_digest=my_digest_fn)`. The adapter takes the raw
-result dict and returns `{"summary": str, "row_hint_format": str}`. Tools
-without an adapter fall back to a naive head+count preview.
-
-**Pilot adapter:** `nmap_status` — returns open port count + full port list +
-host state + job_id, omitting the raw log text (retrievable from scratch).
-
-### Scratch Store (`utils/scratch_store.py`)
-
-Durable, ownership-scoped storage for raw tool results. NOT vector memory
-(no embeddings, no semantic recall) and NOT the findings store (no lifecycle).
-Deterministic, reference-keyed store the model retrieves from when it needs
-the full or filtered output of a prior projected call: via the MCP
-`scratch_search` tool, the gateway's `POST /scratch/search`, or the Open
-WebUI `framework_scratch_search` wrapper.
-
-- **Storage:** `scratch.db` (SQLite metadata) + `scratch-data/` (compressed JSON payloads, 0700/0600).
-- **IDs:** opaque random values (`scratch:<16-hex>`), never sequential.
-- **Ownership:** every entry is scoped to `agent_id`; a valid-looking ref from the wrong agent returns "not found".
-- **Persistence:** entries survive a framework restart (on-disk).
-- **TTL:** 24h (env `SCRATCH_TTL_HOURS`); cleanup runs on every `store()` call.
-- **Caps:** per-entry 256 MiB (`SCRATCH_MAX_PAYLOAD_MB`), per-agent 1 GiB (`SCRATCH_MAX_AGENT_MB`).
-- **Atomic writes:** payload written to temp → fsync → rename → metadata commit.
-
-## Quick Start
+## Full Setup
 
 ### Prerequisites
 
@@ -810,56 +554,22 @@ WebUI `framework_scratch_search` wrapper.
 
 ### Configuration
 
-Environment variables (copy `.env.example` to `.env` and fill in real
-values; see `.env.example` for the full key list):
+Environment variables — copy `.env.example` to `.env` and fill in real
+values. `.env.example` carries the full annotated key list (most knobs are
+optional); the day-one set:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OLLAMA_BASE_URL` | Lab LAN fallback | Ollama API endpoint — set explicitly in `.env` |
-| `CHROMA_HOST` | `localhost` | ChromaDB host |
-| `CHROMA_PORT` | `9000` | ChromaDB port |
-| `SECRETARY_MODEL` | `ornith-1.5:35b` | LLM model for the tool secretary (thinking/reasoning chat model recommended) |
-| `MSGRPC_PASSWORD` | — | Metasploit RPC password |
-| `MSF_RPC_PORT` | `55553` | Metasploit RPC port |
-| `MCP_ENDPOINT` | `http://127.0.0.1:55553` | Metasploit MCP sidecar endpoint |
+| `OLLAMA_BASE_URL` | Lab LAN fallback | Ollama API endpoint — set explicitly in `.env`, keep it loopback/LAN |
+| `SECRETARY_MODEL` | `ornith-1.5:35b` | LLM model for the tool secretary (a thinking/reasoning local chat model is recommended) |
+| `CHROMA_HOST` / `CHROMA_PORT` | `localhost` / `9000` | ChromaDB server used by the tool registry (the memory service uses its own embedded store) |
+| `MSGRPC_PASSWORD` / `MSF_RPC_PORT` | — / `55553` | Metasploit RPC credentials |
+| `GATEWAY_API_KEY` | — | API gateway auth key (unset = unauthenticated dev mode) |
 | `BRAIN_DISPATCH_TIMEOUT` | `600` | Brain socket dispatch timeout (seconds) |
-| `BRAIN_READY_TIMEOUT` | `30` | Bootstrap wait for the Brain socket to accept connections (seconds); the sidecar scans `BRAIN_SCAN_DIRS` before binding, so cold imports can take 6-10s |
-| `BRAIN_EXEC_CEILING` | `3600` | Hard cap on any single tool execution on the Brain (seconds; 0 = off) |
-| `BRAIN_TOOL_EXECUTORS` | `16` | Dedicated Brain thread-pool size for sync tool execution (isolates wedged tools from the default executor) |
-| `SSH_EXEC_TIMEOUT` | `300` | Per-command wall-clock cap for ssh_exec / ssh_exec_batch (seconds; 0 = unbounded). On timeout only the SSH channel is closed — the persistent session handle survives |
-| `SSH_EXEC_OUTPUT_CAP` | `262144` | Max stdout bytes kept per ssh_exec command before truncation |
-| `BRAIN_SCAN_DIRS` | `auxiliaries,listeners,payloads` | Directories the Brain scans at startup |
-| `WORKSPACE_ROOT` | current directory | Root for tool path resolution |
-| `GATEWAY_API_KEY` | — | API gateway authentication key (unset = dev mode) |
-| `ZAP_HOST` | `127.0.0.1` | ZAP daemon API host |
-| `ZAP_PORT` | `8090` | ZAP daemon API port |
-| `ZAP_API_KEY` | — | ZAP daemon API key |
-| `H1_API_USERNAME` | — | HackerOne API username (Basic auth) |
-| `H1_API_TOKEN` | — | HackerOne API token |
-| `COLLAB_DOMAIN` | `oob.lab` | OOB collaborator domain |
-| `COLLAB_HTTP_PORT` | `80` | OOB collaborator HTTP port |
-| `COLLAB_HTTPS_PORT` | `443` | OOB collaborator HTTPS port |
-| `COLLAB_DNS_PORT` | `53` | OOB collaborator DNS port |
-| `COLLAB_PUBLIC_URL` | *(empty)* | Public HTTPS base URL for the collaborator (e.g. Tailscale Funnel `https://<host>.ts.net`); set = public path-based callback URLs + `/r/<id>?to=` 302 endpoint live |
-| `R2_BINARY_TARGETS_ROOT` | `binaries/` | Radare2 binary drop folder |
-| `R2_OUTPUT_CAP` | `32768` | run_r2 output cap in bytes; head+tail truncation with omission marker (`0` disables) |
-| `R2_TIMEOUT` | `120` | r2 subprocess wall-clock cap (seconds) |
-| `JADX_APK_TARGETS_ROOT` | `apk/` | jadx apk drop folder |
-| `JADX_BIN` | — | jadx launcher path (falls back to PATH; requires Java 11+ JRE) |
-| `JADX_TIMEOUT` | `900` | jadx subprocess wall-clock cap (seconds) |
-| `WORDLISTS_ROOT` | `/usr/share/wordlists` | Wordlist tree root |
 | `SECRETARY_MAX_APPROVAL_ROUNDS` | `5` | Max approval rounds per secretary turn |
-| `SECRETARY_TURN_TIMEOUT` | `600` | Secretary turn wall-clock cap (seconds) |
-| `POST_EXECUTION_LOGS` | `failures` | Framework-log tail appended to the result after an approved execution: `off` \| `failures` \| `always` |
-| `SQLMAP_TIMEOUT` | `1800` | sqlmap scan wall-clock cap (seconds) |
-| `ROUTER_MAX_DISTANCE` | `1.1` | API-path semantic-match refusal threshold (ChromaDB L2; lower = stricter) |
-| `SCRATCH_TTL_HOURS` | `24` | Scratch store entry TTL (hours); expired entries are cleaned up on every store call |
-| `SCRATCH_MAX_PAYLOAD_MB` | `256` | Per-entry payload cap for the scratch store (MiB) |
-| `SCRATCH_MAX_AGENT_MB` | `1024` | Per-agent total payload cap for the scratch store (MiB) |
-| `SCRATCH_SMALL_RESULT_BYTES` | `2048` | Serialized results below this size pass through in full even under `digest`/`page` projection |
-| `ZAP_PROXY_BIND` | `0.0.0.0` | ZAP browser-proxy bind address (daemon API ACL stays loopback) |
-| `ZAP_XMX` | `512m` | ZAP daemon JVM heap size |
-| `INTIGRITI_USERNAME` | — | Intigriti platform username (scope integration) |
+| `ZAP_API_KEY` | — | ZAP daemon API key |
+| `H1_API_USERNAME` / `H1_API_TOKEN` | — | HackerOne API credentials (scope integration) |
+| `TOOL_BUDGET_PER_TURN` | `10` | Per-turn tool-execution cap in the gateway lanes (0 = off) |
 
 ### Running
 
@@ -961,7 +671,7 @@ pause for operator approval.
   (`digest` by default) before entering the model's context window — large
   outputs go to the durable scratch store intact and the model gets a
   compact envelope plus a retrieval reference (see
-  [Result Projection](#result-projection-utilsresult_projectionpy)).
+  [Result Projection](utils/README.md#result-projection-result_projectionpy)).
 - **Scope compliance:** `check_scope` gates every scan against the loaded
   HackerOne program scope before execution — out-of-scope assets are
   rejected, and explicit out-of-scope entries override in-scope wildcards.
@@ -1110,7 +820,7 @@ schema.md               SQLite database schema
 AGENTS.md               AI agent development guide
 docs/                   Target dossiers (local-only, gitignored)
 ledger_archive/         Rotated-out ledger snapshots (local-only, gitignored)
-dockered/               Docker workbench: compose, Dockerfiles, start_gateway.py, entrypoint
+dockered/               Container workbench: ChromaDB + Open WebUI + JupyterLab (compose, jupyter.Dockerfile; see dockered/README.md)
 owui-tools/             Open WebUI tool wrappers (framework bridge: search/run/memory/health)
 .env.example            Configuration template (copy to .env; .env is not tracked)
 ```

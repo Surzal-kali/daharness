@@ -1,50 +1,50 @@
 # =============================================================================
-# Framework workbench: Open Terminal + Open WebUI + JupyterLab (nursery) + ChromaDB
+# Framework workbench: ChromaDB + Open WebUI + JupyterLab (tool nursery)
 #
 # NETWORK POSTURE (2026-09-17, user decision "C"): the iptables lockdown is
 # GONE — no NET_ADMIN caps, no cage, on any service. Rationale: the framework
 # is the scope-lined gateway to the outside world (check_scope / .scope files /
 # RoE headers enforce program scope in-process), and the only consumer the
 # cage ever actually restricted was the secretary chat loop. The cage also
-# collided with the workbench topology: the gateway+brain run INSIDE the
-# open-terminal container, so LOCKDOWN_NETWORK caged the framework's own
+# collided with the workbench topology: the gateway+brain used to run INSIDE
+# the (now-removed) open-terminal container, so LOCKDOWN_NETWORK caged the framework's own
 # target lanes (inspect_host, amass, ZAP, nmap vs real hosts) along with the
 # shell. Scope discipline is now purely the in-process layer + operator RoE.
 #
-# open-terminal bind-mounts the live production tree (no COPY) and hosts the
-# framework gateway (:6000) + Brain sidecar; its shell is the agent runtime.
+# The framework gateway + Brain sidecar no longer run inside this stack (the
+# old open-terminal service was removed) — run them on the host via
+# bootstrap.py / bootstrap.py --daemon; see dockered/README.md.
 #
-# JupyterLab (the tool nursery) shares the live framework tree and reaches the
-# gateway on the workbench subnet; with the cage gone it can also be proxied
-# for remote access. JUPYTER_TOKEN-gated and bound to the host's
-# JupyterLab port on all interfaces (operator choice, reaches the lab lanes).
+# JupyterLab (the tool nursery) bind-mounts the live framework tree and the
+# dabooks work dir; its daharness kernel drives the same tool lane as the
+# Brain sidecar and tool_repl, reaching the Brain through the shared
+# run/brain.sock inside the bind-mounted tree. JUPYTER_TOKEN-gated and
+# bound to the host's JupyterLab port on all interfaces (operator choice,
+# reaches the lab lanes).
 #
 # Open WebUI is the open chat frontend: it does its own web search and calls
 # the framework's API routes for tool/code execution.
 #
 # ChromaDB is defined below as the `chroma` service — it mirrors the previous
 # standalone `chroma` container (same image, same config.yaml, same `chroma-data`
-# bind mount, host port 9000).  open-terminal reaches it by DNS name `chroma`
-# on the workbench network.  See the note above the service block about removing
-# the standalone container first.
+# bind mount, host port 9000).  jupyter and open-webui reach it by DNS name
+# `chroma` on the workbench network.  See the note above the service block
+# about removing the standalone container first.
 #
 # Usage:
 #   cd dockered
-#   ./up.sh                  # builds + starts (removes legacy chroma first)
+#   docker rm -f chroma      # clear the standalone container if present
+#   docker compose up -d --build        # full service map: dockered/README.md
 #
-#   # or manually:
-#   docker rm -f chroma       # clear the standalone container if present
-#   docker compose up -d --build
+# ChromaDB:    http://localhost:9000      (vector registry, reused volume)
+# Open WebUI:  http://localhost:3000      (chat front end)
+# JupyterLab:  http://localhost:8888      (tool nursery, JUPYTER_TOKEN)
+# Framework gateway + Brain: run on the HOST lane (bootstrap.py; gateway :5000)
 #
-# Open Terminal API:  http://localhost:8000   (connect Open WebUI here)
-# Framework gateway:  http://localhost:6000   (REST + MCP, from host)
-# Open WebUI:         http://localhost:3000   (chat front end)
-# JupyterLab:         http://localhost:8888   (dev/automation IDE, localhost-only)
-#
-# open-terminal now bind-mounts the live production tree (..) at /opt/framework
-# instead of baking a COPY, so code edits on the host are picked up with no
-# rebuild. Note: .dockerignore does NOT apply to bind mounts — .git/ and any
-# non-ignored host files become visible inside the container.
+# Both jupyter and (previously) open-terminal bind-mount the live production
+# tree instead of baking a COPY, so code edits on the host are picked up with
+# no rebuild. Note: .dockerignore does NOT apply to bind mounts — .git/ and
+# any non-ignored host files become visible inside the containers.
 #
 # Override API keys / tokens via shell env or a dockered/.env file:
 #   OPEN_TERMINAL_API_KEY=your-key
@@ -77,20 +77,20 @@ services:
 
   # ─────────────────────────────────────────────────────────────────────────
   # Open WebUI — chat front end layered over the framework.
-  # Reaches open-terminal at open-terminal:8000 (tools) and Ollama directly at
-  # 10.10.10.128:11434 (LLM, host lane enp92s0 — the lab-switch lane is routed
-  # and SNATed downwind, so containers reach it through the host). Not behind
-  # the open-terminal firewall — this is the open dev surface, not the gated
-  # agent surface.
+  # Talks to Ollama directly at 10.10.10.128:11434 (LLM, host lane enp92s0 —
+  # the lab-switch lane is routed and SNATed downwind, so containers reach it
+  # through the host); framework tool calls go through the owui-tools
+  # wrappers (gateway_url valve — see dockered/README.md). This is the open
+  # dev surface, not the gated agent surface.
   # ─────────────────────────────────────────────────────────────────────────
   open-webui:
     # NOTE: pinned to :dev (not :main) because the interactive terminal shell
-    # is broken in the current stable release v0.11.3. Open WebUI's WebSocket
-    # proxy omits the X-User-Id / X-Session-Id headers that open-terminal's
-    # attach handler checks, so every interactive PTY attach is closed with
-    # 4004 "Session not found" (REST/file-browser/AI tool calls still work).
-    # Fixed in dev: see open-webui/open-webui#29787. Switch back to :main once
-    # a stable release newer than v0.11.3 ships (0.11.4+).
+    # is broken in the current stable release v0.11.3 — Open WebUI's WebSocket
+    # proxy omits the X-User-Id / X-Session-Id headers its attach handler
+    # checks, so every interactive PTY attach is closed with 4004 "Session
+    # not found" (REST/file-browser/AI tool calls still work). Fixed in dev:
+    # see open-webui/open-webui#29787. Switch back to :main once a stable
+    # release newer than v0.11.3 ships (0.11.4+).
     image: ghcr.io/open-webui/open-webui:dev
     ports:
       - "3000:8080"
@@ -123,7 +123,8 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # JupyterLab — notebook/code-execution workbench.
   #
-  # This is intentionally a separate lane from open-terminal. The live
+  # This is intentionally a separate lane from the host lane where the
+  # framework gateway + Brain run. The live
   # framework tree is mounted so the daharness kernelspec and gateway wiring
   # can be configured manually while experimenting with Open WebUI's code
   # execution integration.

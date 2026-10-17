@@ -29,7 +29,7 @@ kali                                          containers (workbench net)
   non-container names upstream to dnsmasq. Container names need no /etc/hosts.
 - **Lane parity**: only target-touching execution surfaces get the `dns:`
   entry. Today that is the `jupyter` service (kernel lane). If another lane
-  (e.g. `open-terminal` returning) executes target traffic, give it the same
+  executes target traffic later, give it the same
   `dns:` — same rule as scope-gate coverage.
 
 ## Repo-managed pieces (survive reinstalls)
