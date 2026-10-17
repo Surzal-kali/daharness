@@ -51,11 +51,11 @@ target:
   `cmd/unix/reverse_perl`, `cmd/unix/bind_netcat_gaping`).
   `dispatch_metasploit` validates `PAYLOAD` against
   `module.compatible_payloads` and steers the caller at `cmd/unix/*`.
-- **Meterpreter payloads are unusable through this client** —
-  pymetasploit3 serializes the meterpreter `AutoLoadExtensions` option as a
-  non-scalar and MSF rejects the launch ("Invalid module option value for
-  AutoLoadExtensions: must be a scalar"). `dispatch_metasploit` hard-blocks
-  any payload containing `meterpreter` with that explanation.
+- **Meterpreter payloads run through this client now** — the old
+  `AutoLoadExtensions` non-scalar serialization bug no longer reproduces on
+  current msfrpcd (dispatch launches verified with non-null job_id). Preset
+  defaults stay pure shell; meterpreter is a valid explicit `generate_payload`
+  choice, and dispatch holds its callback like any other.
 - **`AutoCheck=False` + `ForceExploit=True` are harness defaults** for
   exploit modules (caller can override either via `options`). The operator
   already approved the run via the human-in-the-loop gate, and the check is

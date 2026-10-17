@@ -22,11 +22,10 @@ on this box — nothing contacts a target and no engagement data egresses
 callback handler is an inbound *listener* (exploit/multi/handler job), not
 outbound traffic.
 
-METERPRETER: blocked, mirroring ``dispatch_metasploit`` — the pymetasploit3
-client cannot serialize meterpreter's AutoLoadExtensions option, so the
-in-framework handler lane can never catch a meterpreter callback.  Use pure
-shell payloads (php/reverse_php, */shell_reverse_tcp, java/jsp_shell_*,
-cmd/unix/*) whose handlers DO work through dispatch_metasploit.
+METERPRETER: generation is allowed — the old AutoLoadExtensions serialization
+bug no longer reproduces on current msfrpcd, mirroring the unblocked
+``dispatch_metasploit`` (launches verified, non-null job_id).  Pure shell
+payloads remain the preset defaults; meterpreter stays an explicit choice.
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 
 # Upload-testing presets: web platform -> (default payload, msfvenom format,
 # file extension).  Each default payload is a pure shell payload whose
-# handler works through dispatch_metasploit (no meterpreter).
+# handler works through dispatch_metasploit; presets stay pure shell by design.
 PRESETS: Dict[str, Tuple[str, str, str]] = {
     "php":    ("php/reverse_php",           "raw",  ".php"),
     "php_bind": ("php/bind_php",            "raw",  ".php"),
@@ -174,9 +173,9 @@ async def msfvenom_menu(kind: str = "payloads", query: str = "") -> Dict[str, An
     "Preset names (php, jsp, war, aspx, asp, python, nodejs, ruby, elf, exe) "
     "fill payload+format+extension defaults for a target stack — e.g. "
     "preset='war' yields a deployable java/jsp_shell_reverse_tcp WAR. "
-    "Meterpreter payloads are BLOCKED (pymetasploit3 cannot drive their "
-    "handler — same rule as dispatch_metasploit); use shell_reverse_tcp/"
-    "reverse_php/bind_php family payloads. start_handler=True additionally "
+    "Meterpreter payloads also generate (old RPC block removed, mirroring "
+    "dispatch_metasploit); pure shell payloads remain the preset default. "
+    "start_handler=True additionally "
     "starts a persistent exploit/multi/handler job (same PAYLOAD/LHOST/LPORT) "
     "so the uploaded shell's callback is caught — use it when the target can "
     "route back to LHOST; for targets that cannot reach you, use a *bind* "
@@ -276,19 +275,11 @@ async def generate_payload(
     if not _SAFE_TOKEN.match(payload):
         return _fail(f"Invalid payload name {payload!r} — use a name from msfvenom_menu.")
 
-    # Meterpreter block — mirrors dispatch_metasploit's hard block.  The
-    # in-framework handler lane (this tool's start_handler, or
-    # dispatch_metasploit) cannot drive meterpreter handlers, so generating
-    # one would produce an artifact nothing in this framework can catch.
-    if "meterpreter" in payload.lower():
-        return _fail(
-            f"Meterpreter payloads are blocked ({payload!r}): the pymetasploit3 "
-            "client cannot serialize meterpreter's AutoLoadExtensions option and "
-            "MSF rejects the handler launch — the in-framework catch lane can "
-            "never hold this callback. Use a pure shell payload instead: "
-            "php/reverse_php, java/jsp_shell_reverse_tcp, "
-            "<platform>/shell_reverse_tcp, or cmd/unix/* (see msfvenom_menu)."
-        )
+    # Meterpreter payloads generate fine — mirroring the unblocked dispatch
+    # lane (its old hard block was written for a pymetasploit3/MSF combo where
+    # AutoLoadExtensions serialized non-scalar; that bug no longer reproduces,
+    # verified on current msfrpcd per dispatch_metasploit's note).  Presets
+    # deliberately stay pure-shell.
 
     fmt = (format or preset_format or "raw").strip().lower()
     if not _SAFE_TOKEN.match(fmt):

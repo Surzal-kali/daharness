@@ -303,7 +303,7 @@ The full install instructions (browser-into-repo, root/no-sandbox handling,
 Install Metasploit Framework, set `MSGRPC_PASSWORD` and `MSF_RPC_PORT` in
 `.env`, and `bootstrap.py` starts the `msfrpcd` sidecar automatically and
 vectorizes discovered modules into the tool registry. The client deep-dive
-(payload-family rules, the meterpreter hard-block, `start_handler`
+(payload-family rules, meterpreter RPC notes, `start_handler`
 semantics, LHOST reachability) lives in
 [`payloads/README.md`](payloads/README.md#metasploit-framework).
 

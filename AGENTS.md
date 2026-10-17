@@ -390,15 +390,15 @@ the `module_path` prefix ('exploit'/'auxiliary'/'post', with `post`
 requiring `SESSION`). `payloads/msfvenom_tools.py` + the
 `session_upload` delivery step (`auxiliaries/web_session.py`) form the
 generate → upload → trigger file-upload lane (`dropbox/` output, shared
-`_start_handler_job` listener primitive, meterpreter payloads hard-blocked
-in both lanes).
+`_start_handler_job` listener primitive, meterpreter payloads work through
+both lanes).
 
 The operational rules live in the canonical deep-dive,
 [`payloads/README.md`](payloads/README.md) — keyed facts: a binary
 FTP/TFTP-stager payload cannot stage an ELF through a raw-shell backdoor
 channel ("Unsupported Binary Selected") — use pure-command `cmd/unix/*`
-payloads; meterpreter payloads are unusable through this client
-(`AutoLoadExtensions` serializes non-scalar); `AutoCheck=False` +
+payloads; meterpreter payloads now run through this client (the old
+`AutoLoadExtensions` non-scalar bug no longer reproduces); `AutoCheck=False` +
 `ForceExploit=True` are harness defaults for exploit modules;
 `start_handler=True` starts a persistent handler job and sets
 `DisablePayloadHandler=True`, `start_handler=False` for auxiliaries and

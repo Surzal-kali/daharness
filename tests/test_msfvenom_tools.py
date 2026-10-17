@@ -38,12 +38,19 @@ def _run(coro):
 # --- validation paths (offline) ----------------------------------------------
 
 
-def test_meterpreter_blocked_like_dispatch():
+def test_meterpreter_no_longer_blocked():
+    # dispatch_metasploit's old AutoLoadExtensions hard-block is gone
+    # (launches verified via msfrpcd); msfvenom generation mirrors that.
     for name in ("php/meterpreter/reverse_tcp", "windows/x64/meterpreter_reverse_tcp"):
         r = _run(mv.generate_payload(payload=name, lhost="127.0.0.1", lport=4444))
-        assert r["status"] == "Failed", r
-        assert "blocked" in r["error"].lower(), r
-        assert "AutoLoadExtensions" in r["error"], r  # same reason dispatch gives
+        assert "blocked" not in r.get("error", "").lower(), r
+        if shutil.which("msfvenom"):
+            assert r["status"] == "Success", r
+            assert r.get("out_path"), r
+        else:
+            # no local msfvenom: binary-absent error allowed; a block verdict is not
+            assert "msfvenom binary not found" in r["error"], r
+            assert "block" not in r["error"].lower(), r
 
 
 def test_requires_payload_or_preset():

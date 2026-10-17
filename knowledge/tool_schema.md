@@ -487,7 +487,7 @@ Kernel bare names: `msf_dispatch`, `msf_index`, `msf_set_payload`,
 | tool_id | alias | transport | params | notes |
 |---|---|---|---|---|
 | `index_modules` | `msf_index` | BRAIN_DISPATCH | `module_type` (None), `module_name` (None), `limit` (15) | `exploit.msf` |
-| `dispatch_metasploit` | `msf_dispatch` | **MCP_RPC** | `module_path` (req), `category` (req: exploit/auxiliary/post), `options` (req dict), `start_handler` (False) | `exploit.msf`; scope-gated; meterpreter blocked |
+| `dispatch_metasploit` | `msf_dispatch` | **MCP_RPC** | `module_path` (req), `category` (req: exploit/auxiliary/post), `options` (req dict), `start_handler` (False) | `exploit.msf`; scope-gated; meterpreter supported |
 | `set_payload` | `msf_set_payload` | BRAIN_DISPATCH | `payload_name`, `options` (req) | `exploit.msf` |
 | `get_options` | `msf_options` | BRAIN_DISPATCH | `module_path` (req) | `exploit.msf` |
 | `interact_session` | `msf_interact` | BRAIN_DISPATCH | `handle`, `command` (req) | `exploit.msf`; handle `msf` |
