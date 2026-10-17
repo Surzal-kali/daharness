@@ -102,7 +102,9 @@ def _nmap_target_argv(target: str) -> List[str]:
     "Non-blocking and detached — starts the scan in the background and "
     "returns immediately with a scan ID for later retrieval. Confirm the "
     "launch with one status poll, then hand off to the user; poll again only "
-    "when the user requests an update. NSE scripts "
+    "when the user requests an update. Optional shaping= applies a wire-"
+    "traffic profile from evasion/shaping (quiet/polite/noisy); lab_only "
+    "profiles (decoy/fragment) refuse without SHAPING_LAB_MODE=1. NSE scripts "
     "(--script) run any of the 600+ installed .nse files — service enum "
     "and version probes (smb-enum-shares, smb-enum-users, ldap-search, "
     "ldap-rootdse), vulnerability checks (smb-vuln-ms17-010, "
@@ -113,7 +115,11 @@ def _nmap_target_argv(target: str) -> List[str]:
     next_hints=["nmap_status", "nmap_scripts"],
     untrusted_target=True,
 )
-def run_nmap(target: str, options: str = "-Pn -sV") -> Dict[str, Any]:
+def run_nmap(
+    target: str,
+    options: str = "-Pn -sV",
+    shaping: Optional[str] = None,
+) -> Dict[str, Any]:
     """Launch nmap against ``target`` and return immediately.
 
     nmap runs as a detached background subprocess writing to a per-job log
@@ -135,6 +141,14 @@ def run_nmap(target: str, options: str = "-Pn -sV") -> Dict[str, Any]:
             ``"--script ldap-search --script-args searchFilter='...'"``);
             verify the installed script name with ``nmap_scripts`` first
             so nmap never refuses an unloadable name.
+        shaping: Optional preset name from evasion/shaping.SCAN_SHAPING_PRESETS
+            ('quiet', 'polite', 'noisy' wire profiles; 'decoy'/'fragment' are
+            lab_only and refuse without SHAPING_LAB_MODE=1). Merged argv order
+            is [preset flags, default -Pn, operator options] and nmap honors
+            the LAST occurrence of a repeated flag, so explicit operator
+            flags always win over preset values. Speed templates (-T) tune
+            the scanner's accuracy/speed trade, not the wire: real shaping
+            is --max-rate / --scan-delay (see evasion/shaping.py).
     """
     import shlex
 
@@ -149,6 +163,17 @@ def run_nmap(target: str, options: str = "-Pn -sV") -> Dict[str, Any]:
     opt_list = shlex.split(options) if options else []
     if "-Pn" not in opt_list and "-Pn" not in options:
         opt_list = ["-Pn", *opt_list]
+
+    shaping_resolved = None
+    if shaping:
+        from evasion.shaping import resolve as _shaping_resolve, ShapingError
+        try:
+            shaping_resolved = _shaping_resolve(shaping, lab_mode=None)
+        except ShapingError as e:
+            raise ScopeGateError(f"shaping: {e}") from None
+        # Preset flags go in FRONT: argv order [preset, -Pn default, operator]
+        # means nmap's last-flag-wins semantics give operator > default > preset.
+        opt_list = [*shaping_resolved["merged"], *opt_list]
 
     command = ["nmap", *opt_list, *_nmap_target_argv(target)]
 
