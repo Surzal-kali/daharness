@@ -1,6 +1,6 @@
 # Appendices — Framework Tool Schema
 
-Complete reference for every tool in the framework registry. 201 tools
+Complete reference for every tool in the framework registry. 204 tools
 across four roots. All `BRAIN_DISPATCH` transport unless marked otherwise.
 Parameters listed as `name (type, default)` — `(req)` = required.
 
@@ -11,7 +11,7 @@ One SQLite database file at the workspace root (`ids.db`). Shared:
 `daharness/findings.py:FindingStore` owns `findings`. Concurrent access from
 the gateway, secretary, and MCP clients is handled with busy-timeout + retry.
 
-`daharness.findings.ensure_ids_db()` creates the file and all four tables on
+`daharness.findings.ensure_ids_db()` creates the file and all five tables on
 first call — bootstrap's `launch_all` runs it as a preflight, and
 `framework_health` calls it so a fresh checkout reports the DB as up.
 Idempotent on an existing database.
@@ -65,6 +65,25 @@ Idempotent on an existing database.
 | closed_reason | TEXT | added by migration                                              |
 | closed_ts     | TEXT | added by migration                                              |
 
+### unknowns table
+
+Open-questions ledger (companion to findings — conclusions vs. "don't
+know yet"). Same root-guard + WAL treatment.
+
+| Column      | Type | Notes                                                        |
+|-------------|------|--------------------------------------------------------------|
+| id          | TEXT | PRIMARY KEY — sequential `U-001`-style, IntegrityError-safe   |
+| question    | TEXT | NOT NULL — what is not known yet                             |
+| domain      | TEXT | recon\|web\|creds\|enum\|postex\|scope\|general (default general) |
+| asset       | TEXT | related host/URL/endpoint                                    |
+| context     | TEXT | how the question arose / what was tried                      |
+| opened_by   | TEXT | tool chain or agent that minted it                           |
+| resolution  | TEXT | the answer, when resolved                                    |
+| resolved_by | TEXT | finding ID (promoted) or agent note                          |
+| status      | TEXT | NOT NULL DEFAULT `'open'` — open\|resolved\|wontfix\|promoted  |
+| ts          | TEXT | NOT NULL — UTC ISO-8601                                      |
+| closed_ts   | TEXT | empty while open                                             |
+
 WAL mode: `PRAGMA journal_mode=WAL` — readers don't block the writer across
 processes. A root guard chowns `ids.db` + WAL + SHM back to the workspace
 owner when a prior root run left them root-owned.
@@ -99,6 +118,31 @@ Tools with `result_digest` adapters (compact projection lane):
 `run_jadx`, `session_get`, `session_post`, `session_request`,
 `session_upload`, `burp_send_http1_request`, `burp_send_http2_request`,
 `burp_send_raw`.
+
+## untrusted-target provenance
+
+Tools carrying `untrusted_target=True` (their output embeds analysis-target
+content — page HTML, shell output, banners, decompiled code, strings; the
+executor stamps result envelopes with `_provenance` and the secretary treats
+their content as DATA, never instructions):
+`session_get`, `session_post`, `session_request`, `session_upload`,
+`ssh_connect`, `ssh_exec`, `ssh_exec_batch`, `interact_session`, `run_r2`,
+`run_jadx`, `run_nmap`, `nmap_status`, `run_masscan`, `masscan_status`,
+`run_ffuf`, `ffuf_status`, `probe_web`, `extract_js_routes`,
+`zap_history_regex`, `zap_alerts`, `zap_alert_message`.
+
+## analysis snapshot cache
+
+`run_r2` memoizes successful analyses in `utils/snapshot_cache.py`
+(`run/analysis_snapshots.db`), keyed on the target's **sha256** + op
+(verb/addr/count/r2ghidra/output-cap/timeout). Identical repeat calls return
+the stored envelope verbatim with a `_snapshot: {hit: true}` stamp —
+exploring a binary pays `aaa` once instead of once per call. Deterministic
+lane only (never extends to live scanners — nmap/ffuf/masscan observe a
+changing world); errors are never cached; identical bytes at a new path get
+`target` patched to the current call. `cache=False` skips read+write,
+`refresh=True` recomputes and overwrites. TTL `SNAPSHOT_TTL_HOURS` (168h),
+per-target cap `SNAPSHOT_MAX_ENTRIES` (200).
 
 ---
 
@@ -195,6 +239,16 @@ that was a stale curated alias for the deleted `run_dns_lookup` wrapper).
 | tool_id | params | tags |
 |---|---|---|
 | `framework_health` | none | `infra` |
+| `framework_doctor` | `provider` ("") | `infra` |
+
+`framework_doctor` probes per-lane capability (REA-style):
+`{available, reason, remediation}` per provider. Full sweep covers r2
+(+-r2ghidra plugin + drop dir), jadx (+java + apk dir), masscan (+raw-socket
+CAP_NET_RAW check), msf (+RPC port), scanners (nmap/ffuf/hydra/sqlmap on
+PATH), secretary_model (on the Ollama host), and snapshot_cache stats.
+Drill down with `provider=` (r2\|jadx\|masscan\|msf\|scanners\|
+secretary_model\|snapshot_cache). Remediation strings agree with the tools'
+own error paths (pdg's "run: r2pm -ci r2ghidra", masscan's CAP_NET_RAW).
 
 ## auxiliaries/ftp_recon.py
 
@@ -283,8 +337,13 @@ function name, not the kernel bare name.
 
 | tool_id | params | notes |
 |---|---|---|
-| `run_r2` ¶ | `target` (req), `command` (req — allowlist: aaa afl afi af iI iS iE ii is iR iz izz pdf pdg pd px axt axf ps), `addr` (None), `count` (None) | `infra`; digest adapter |
+| `run_r2` ¶ | `target` (req), `command` (req — allowlist: aaa afl afi af iI iS iE ii is iR iz izz pdf pdg pd px axt axf ps), `addr` (None), `count` (None), `cache` (True), `refresh` (False) | `infra`; digest adapter; snapshot cache |
 | `list_r2_targets` | none | `infra` |
+
+`run_r2` caches successful runs by target sha256 + op — repeat calls on the
+same binary return the stored envelope instantly (`_snapshot.hit=true`).
+`cache=False` skips, `refresh=True` recomputes and overwrites; errors are
+never cached.
 
 ## auxiliaries/smb_scanner.py
 
@@ -513,6 +572,18 @@ Kernel bare names: `msf_dispatch`, `msf_index`, `msf_set_payload`,
 | `render_findings` | auto | `severity` (""), `asset` (""), `status` (""), `include_closed` (True) | `infra` |
 | `close_finding` | auto | `finding_id`, `status` (req), `reason` (""), `closed_by` (""), `duplicate_of` ("") | `infra` |
 | `supersede_finding` | auto | `old_id`, `new_id` (req), `reason` (""), `closed_by` ("") | `infra` |
+| `record_unknown` | auto | `question` (req), `domain` ("general"), `asset` (""), `context` (""), `tool_chain` ("") | `infra` |
+| `list_unknowns` | auto | `status` ("open"), `domain` (""), `asset` (""), `include_closed` (False) | `infra` |
+| `resolve_unknown` | auto | `unknown_id`, `status` (req: resolved\|wontfix\|promoted), `resolution` (""), `resolved_by` ("") | `infra` |
+
+All three `*_unknown` tools share the findings store's terminal lane
+(`utils.findings.` prefix) and stay callable past the per-turn tool budget.
+`record_unknown` mints U-001-style IDs (domains:
+recon\|web\|creds\|enum\|postex\|scope\|general); `promoted` requires
+`resolved_by` = the finding ID the question became. `list_unknowns` defaults
+to open only ("what haven't we answered yet"). `render_findings` output
+carries an **Open questions (unresolved)** appendix (renders even with zero
+findings).
 
 ## utils/log_reader.py
 

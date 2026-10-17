@@ -870,6 +870,17 @@ class SecretaryMixin:
               dict with a ready-to-call tool + exact arguments — pass the arguments verbatim
               for the next page / full retrieval instead of re-deriving them.
 
+            Capability checks (framework_doctor):
+            - Before a native-analysis chain (r2, jadx) or an exploit chain (msf), call
+              framework_doctor (optionally provider='r2'|'jadx'|'msf'|...) when you are unsure
+              the lane can run. It returns {available, reason, remediation} per lane.
+            - When a tool fails with a missing-component error, the doctor's remediation for
+              that lane names the same fix — read it to the operator, do not retry the tool.
+            - run_r2 results are cached by content: a repeat call on the same binary returns
+              the stored analysis instantly (stamped _snapshot.hit=true). Pass refresh=true
+              only if you suspect the result is stale; changed binaries miss the cache
+              automatically.
+
             Tool IDs vs argument values (CRITICAL — this is the main failure mode):
             - A tool ID is a dotted python path with NO slashes, e.g.
               'payloads.metasploiting.MetasploitClient.dispatch_metasploit'. You pass it as

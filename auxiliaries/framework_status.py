@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from constants import framework_tool, resolve_workspace_root, brain_socket_path
+from utils.snapshot_cache import get_snapshot_store
 
 
 def _check_tcp(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -176,5 +178,220 @@ def framework_health() -> Dict[str, Any]:
         "overall": overall,
         "subsystems_up": f"{up_count}/{total}",
         "subsystems": subsystems,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# framework_doctor — capability probes for the analysis/attack tooling lanes
+# ---------------------------------------------------------------------------
+# REA-style doctor (morluto/rea: "rea doctor --provider X"): framework_health
+# answers "is the harness alive"; framework_doctor answers "can I actually
+# run X".  Every probe returns {available, reason, remediation} so the
+# secretary can read the same remediation when a tool later fails with the
+# matching error (pdg's "run: r2pm -ci r2ghidra", masscan's raw-socket trap,
+# jadx's Java requirement).
+
+def _check_path(cmd: str) -> Dict[str, Any]:
+    """PATH probe for a CLI tool, with install-string remediation."""
+    import shutil
+    path = shutil.which(cmd)
+    if path:
+        return {"available": True, "reason": path, "remediation": ""}
+    return {
+        "available": False,
+        "reason": f"{cmd} not found on PATH",
+        "remediation": f"install {cmd} (apt/dnf/pacman or upstream installer)",
+    }
+
+
+def _check_r2() -> Dict[str, Any]:
+    """r2 binary + r2ghidra decompiler + drop folder, in one provider record."""
+    r2 = _check_path("r2")
+    if not r2["available"]:
+        r2["remediation"] = "install radare2 (apt install radare2 / r2pm setup)"
+        return r2
+    try:
+        from auxiliaries.radare2 import _r2ghidra_available, BINARY_TARGETS_ROOT
+        plugin_ok = _r2ghidra_available()
+    except Exception as exc:
+        plugin_ok = False
+        r2["extra"] = {"plugin_probe_error": str(exc)}
+    drop_ok = os.path.isdir(BINARY_TARGETS_ROOT)
+    available = plugin_ok and drop_ok
+    if available:
+        reason = f"r2 on PATH; r2ghidra plugin loadable; drop dir {BINARY_TARGETS_ROOT}"
+    elif not plugin_ok:
+        reason = "r2 on PATH but the r2ghidra decompiler plugin is missing (pdg will refuse)"
+        r2["remediation"] = "run: r2pm -ci r2ghidra"
+    else:
+        reason = f"r2 + plugin OK but drop dir {BINARY_TARGETS_ROOT} is missing"
+        r2["remediation"] = f"create {BINARY_TARGETS_ROOT} or set R2_BINARY_TARGETS_ROOT"
+    return {**r2, "available": available, "reason": reason}
+
+
+def _check_jadx() -> Dict[str, Any]:
+    """jadx + Java runtime + apk drop folder."""
+    jadx = _check_path("jadx")
+    if not jadx["available"]:
+        jadx["remediation"] = "install jadx (apt install jadx or the upstream release zip; needs JDK 11+)"
+        return jadx
+    java_ok = shutil.which("java") is not None
+    apk_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "apk")
+    apk_ok = os.path.isdir(apk_dir)
+    if java_ok and apk_ok:
+        return {**jadx, "available": True,
+                "reason": f"jadx on PATH; java present; drop dir {apk_dir}"}
+    if not java_ok:
+        return {**jadx, "available": False,
+                "reason": "jadx on PATH but no java runtime",
+                "remediation": "install a JDK 11+ (apt install default-jdk)"}
+    return {**jadx, "available": False,
+            "reason": f"jadx + java OK but drop dir {apk_dir} is missing",
+            "remediation": f"create {apk_dir} (APK targets go there)"}
+
+
+def _check_masscan() -> Dict[str, Any]:
+    """masscan + raw-socket capability (classic doctor-worthy runtime trap)."""
+    m = _check_path("masscan")
+    if not m["available"]:
+        return m
+    raw_ok = False
+    try:
+        import socket as _s
+        s = _s.socket(_s.AF_INET, _s.SOCK_RAW, _s.IPPROTO_TCP)
+        s.close()
+        raw_ok = True
+    except (PermissionError, OSError):
+        raw_ok = False
+    if raw_ok:
+        return {**m, "available": True, "reason": "masscan on PATH; SOCK_RAW creatable"}
+    return {**m, "available": False,
+            "reason": "masscan on PATH but raw sockets are not permitted — masscan will fail at launch, not at probe",
+            "remediation": "run under root/CAP_NET_RAW (sudo setcap cap_net_raw+ep $(which masscan))"}
+
+
+def _check_msf() -> Dict[str, Any]:
+    """msfconsole/msfvenom on PATH + msfrpcd RPC port answering."""
+    console = _check_path("msfconsole")
+    venompresent = _check_path("msfvenom")
+    rpc_port = int(os.getenv("MSF_RPC_PORT", "55553"))
+    rpc_up = _check_tcp("127.0.0.1", rpc_port, timeout=1.0)
+    progs_ok = console["available"] and venompresent["available"]
+    if progs_ok and rpc_up:
+        return {"available": True,
+                "reason": f"msfconsole + msfvenom on PATH; RPC answering on 127.0.0.1:{rpc_port}",
+                "remediation": ""}
+    if not progs_ok:
+        missing = [c for c, p in (("msfconsole", console), ("msfvenom", venompresent)) if not p["available"]]
+        return {"available": False,
+                "reason": f"missing on PATH: {', '.join(missing)}",
+                "remediation": "install the metasploit-framework package"}
+    return {"available": False,
+            "reason": f"msf binaries present but RPC not answering on 127.0.0.1:{rpc_port}",
+            "remediation": "start the framework (python bootstrap.py) or msfrpcd manually"}
+
+
+def _check_scan_tools() -> List[Dict[str, Any]]:
+    """Pure-PATH probes for the scanner lane (nmap/ffuf/hydra/sqlmap)."""
+    out = []
+    for cmd in ("nmap", "ffuf", "hydra", "sqlmap"):
+        rec = _check_path(cmd)
+        rec["provider"] = cmd
+        out.append(rec)
+    return out
+
+
+def _check_secretary_model() -> Dict[str, Any]:
+    """Is SECRETARY_MODEL actually pulled on the Ollama host?"""
+    model = os.getenv("SECRETARY_MODEL", "ornith-1.5:35b")
+    base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    raw = base.rstrip("/")
+    if raw.endswith("/v1"):
+        raw = raw[:-3]
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{raw}/api/tags", timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        models = {m.get("name", "") for m in data.get("models", [])}
+        if model in models or any(m.split(":")[0] == model.split(":")[0] for m in models):
+            return {"available": True, "provider": "secretary_model",
+                    "reason": f"{model} present on the Ollama host", "remediation": ""}
+        return {"available": False, "provider": "secretary_model",
+                "reason": f"{model} not found on the Ollama host",
+                "remediation": f"run: ollama pull {model}"}
+    except Exception as exc:
+        return {"available": False, "provider": "secretary_model",
+                "reason": f"Ollama API unreachable at {raw}: {exc}",
+                "remediation": "start ollama or fix OLLAMA_BASE_URL"}
+
+
+PROVIDER_KEYS = ("r2", "jadx", "masscan", "msf", "scanners",
+                 "secretary_model", "snapshot_cache")
+
+
+@framework_tool(
+    "Run capability probes for the framework's analysis and attack tooling "
+    "lanes (REA-style doctor): r2 + r2ghidra plugin, jadx + java, masscan + "
+    "raw-socket capability, msfconsole/msfvenom + RPC port, the scanner "
+    "tools (nmap/ffuf/hydra/sqlmap), the secretary model on the Ollama "
+    "host, plus the snapshot cache stats. Each probe returns "
+    "available/reason/remediation so a 'can I run X' question is answered "
+    "before X is attempted. Pass provider to drill into one lane "
+    "(r2|jadx|masscan|msf|scanners|secretary_model|snapshot_cache)."
+)
+def framework_doctor(provider: str = "") -> Dict[str, Any]:
+    """Probe per-lane capability and return a doctor report.
+
+    Args:
+        provider: Optional single lane to probe
+            (r2|jadx|masscan|msf|scanners|secretary_model).  Empty = full sweep.
+    """
+    p = (provider or "").strip().lower()
+    providers: Dict[str, Any] = {}
+
+    if p in ("", "r2"):
+        providers["r2"] = _check_r2()
+    if p in ("", "jadx"):
+        providers["jadx"] = _check_jadx()
+    if p in ("", "masscan"):
+        providers["masscan"] = _check_masscan()
+    if p in ("", "msf"):
+        providers["msf"] = _check_msf()
+    if p in ("", "scanners"):
+        for rec in _check_scan_tools():
+            providers[rec["provider"]] = rec
+    if p in ("", "secretary_model"):
+        providers["secretary_model"] = _check_secretary_model()
+    if p in ("", "snapshot_cache"):
+        snap = get_snapshot_store().stats()
+        providers["snapshot_cache"] = {
+            "available": not snap.get("error", False),
+            "provider": "snapshot_cache",
+            "reason": (
+                f"{snap.get('entries', 0)} entries, {snap.get('hits', 0)} hits"
+            ),
+            "remediation": "",
+        }
+
+    # Contract: every record carries its own provider name (the shape tests
+    # assert it, and downstream consumers format it from the record alone).
+    for name, rec in providers.items():
+        rec.setdefault("provider", name)
+
+    unknown = p not in ("",) + PROVIDER_KEYS
+    if unknown:
+        providers["_unknown_provider"] = {
+            "available": False, "provider": p,
+            "reason": f"unknown provider {p!r}",
+            "remediation": "pick one of: r2, jadx, masscan, msf, scanners, secretary_model",
+        }
+
+    ok = sum(1 for v in providers.values() if v.get("available"))
+    return {
+        "overall": "ok" if ok == len(providers) else (
+            "degraded" if ok else "down"),
+        "available": f"{ok}/{len(providers)}",
+        "providers": providers,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }

@@ -36,6 +36,9 @@ Execution path: secretary LLM → `search_tools` (vector search, returns manifes
 - **Process-local state**: `utils/session_manager.py` (live connections keyed by `session_id`) and class-instance caches exist per-process; in-process fallback cannot see Brain-held sessions. Tools should detect and report this, not silently fail.
 - **Scope gate** (`utils/scope_gate.py`): operator-armed via the REPL (`scope on <handle>`), state persisted to `scope/.armed_packet_scope.json` (mtime-checked every call, so REPL changes apply inside a running Brain). Arming is deliberately **not** exposed as an `@framework_tool` so the secretary can never toggle it. Every traffic-sending tool raises `ScopeGateError` on a blocked target.
 - **Findings** (`daharness/findings.py` + `utils/findings.py`): SQLite-backed structured findings, with program-scope checks (`check_scope`) and reportability gating.
+- **Unknown ledger** (`daharness/findings.py` + `utils/findings.py`): open-questions table in the same store; `record_unknown`/`list_unknowns`/`resolve_unknown`.
+- **Analysis snapshot cache** (`utils/snapshot_cache.py` + `run_r2`): successful r2 runs memoized at `run/analysis_snapshots.db`, keyed on target sha256 + op (verb/addr/count/settings); identical repeats serve verbatim with a `_snapshot.hit` stamp. **Deterministic tools only — never extend to live scanners**; errors are never cached; `cache=False` skips, `refresh=True` recomputes + overwrites.
+- **Capability doctor** (`auxiliaries/framework_status.py:framework_doctor`): per-lane `{available, reason, remediation}` probes (r2+r2ghidra, jadx+java, masscan+CAP_NET_RAW, msf+RPC, scanners, secretary model); complements `framework_health` (infra up/down).
 - **API gateway** (`api_gateway.py`): FastAPI exposing `/tools/execute`, `/tools/search`, `/memory/*`, and a streamable-HTTP MCP endpoint (`/mcp`).
 
 ## Conventions

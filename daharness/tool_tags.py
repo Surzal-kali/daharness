@@ -230,6 +230,7 @@ TOOL_TAGS: Dict[str, Tuple[str, ...]] = {
     "auxiliaries.burp_mcp.burp_health": ("infra",),
     # --- infra (framework tooling + internals) ---------------------------------
     "auxiliaries.framework_status.framework_health": ("infra",),
+    "auxiliaries.framework_status.framework_doctor": ("infra",),
     "auxiliaries.cert_tools.generate_certs": ("infra",),
     "auxiliaries.cert_tools.clear_certs": ("infra",),
     "auxiliaries.radare2.run_r2": ("infra",),

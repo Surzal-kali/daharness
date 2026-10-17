@@ -78,6 +78,8 @@ bytes so text files and junk don't pollute the listing.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
 import shutil
@@ -86,6 +88,13 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from constants import framework_tool
+from utils.snapshot_cache import (
+    build_cache_key,
+    get_snapshot_store,
+    sha256_of_file,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +617,8 @@ def run_r2(
     command: str,
     addr: Optional[str] = None,
     count: Optional[int] = None,
+    cache: bool = True,
+    refresh: bool = False,
 ) -> Dict[str, Any]:
     """Run a single radare2 command against a binary and return a structured envelope.
 
@@ -616,6 +627,16 @@ def run_r2(
     (read-only — never ``-w``), which is cleaned up after.  The composed
     ``-c`` string is built by this function from validated pieces; the caller
     never supplies ``;`` or ``@``.
+
+    Snapshot cache (default on): r2 analysis is deterministic — same target
+    bytes + same verb/addr/count/setting yields the same output.  Successful
+    runs are keyed on the target's sha256 and reused verbatim on repeat
+    calls, so exploring a binary (afl, then pdf/pdg per function of
+    interest) pays ``aaa`` once instead of once per call.  Errors are never
+    cached.  Pass ``cache=False`` to skip reads AND writes, or ``refresh=True``
+    to bypass the read and overwrite the stored entry.  Scanners (nmap,
+    ffuf, masscan) deliberately don't share this cache — live-target results
+    are observations of a changing world, not pure functions of bytes.
 
     Args:
         target: Path to the binary to analyze.  Must exist and be readable.
@@ -627,6 +648,12 @@ def run_r2(
         count: Optional integer for ``pd`` (instruction count, capped at
             512) and ``px`` (byte count, capped at 1024).  Ignored by other
             commands.
+        cache: Use the snapshot cache (read on repeat, write on success).
+            False skips both — a fresh r2 run, nothing stored.
+        refresh: Force a real r2 run even if a snapshot exists, and
+            overwrite the stored entry.  cache=False + refresh=True is
+            contradictory; refresh wins and still writes (treat refresh as
+            "recompute and re-store").
 
     Returns:
         A dict envelope with::
@@ -707,6 +734,51 @@ def run_r2(
     # Work against the resolved absolute path from here on.
     target = resolved
 
+    # --- snapshot cache lookup (deterministic-lane memoization) ----------
+    # Keyed on the file's CONTENT (sha256) so a modified binary re-analyzes
+    # automatically; the op key covers verb/addr/count + every setting that
+    # changes the output (r2ghidra availability, output cap, timeout).  The
+    # key is computed BEFORE reading so the store step below can reuse it
+    # even when lookup was skipped (cache=False, hashing failure, DB error).
+    # Any failure in the cache layer degrades silently to a normal run.
+    snapshot_hit: Optional[Dict[str, Any]] = None
+    content_key = sha256_of_file(target)
+    op_key: str = ""
+    key: str = ""
+    if content_key is not None:
+        try:
+            op_key = json.dumps({
+                "verb": command,
+                "addr": addr or "",
+                "count": count_val,
+                "r2ghidra": ghidra_ok,
+                "output_cap": _OUTPUT_CAP,
+                "timeout": _R2_TIMEOUT,
+            }, sort_keys=True)
+            key = build_cache_key(content_key, op_key)
+            if (cache or refresh) and not refresh:
+                _snap = get_snapshot_store()
+                _snap.purge_expired()
+                snapshot_hit = _snap.lookup(key)
+            if snapshot_hit is not None:
+                # Contextual fields must describe THIS call, not the run that
+                # populated the cache: identical bytes may live at a different
+                # path (rebuilt binary, moved drop folder), and the model asked
+                # about the current path.
+                snapshot_hit["target"] = target
+                snapshot_hit["_snapshot"] = {
+                    "hit": True,
+                    "key": key,
+                    "content_key": content_key,
+                    "note": (
+                        "Reused a cached analysis result (same target bytes "
+                        "+ same operation). Pass refresh=true to recompute."
+                    ),
+                }
+                return snapshot_hit
+        except Exception as exc:  # noqa: BLE001 — caching must never fail the run
+            logger.debug("[r2] snapshot lookup skipped: %s", exc)
+
     # --- compose the -c string from validated pieces ---
     composed = _compose_cmd(command, addr, count_val)
 
@@ -774,7 +846,7 @@ def run_r2(
     summary = _summarize(command, clean_lines, addr)
     delta = _delta_note(command, clean_lines, addr)
 
-    return {
+    envelope = {
         "status": "ok" if proc.returncode == 0 else "error",
         "command": composed,
         "summary": summary,
@@ -789,6 +861,36 @@ def run_r2(
         "next_hints": _hints_for(command, output),
         "delta": delta,
     }
+
+    # --- snapshot store (successful runs only) ---------------------------
+    # Written AFTER the envelope is fully built so what's cached is exactly
+    # what the model would have received.  Non-zero exit or an omitted-bytes
+    # bug aside, this is the only path that stores.  Store failures log and
+    # degrade — the run result is unaffected.
+    if envelope["status"] == "ok" and content_key is not None and (cache or refresh):
+        try:
+            _snap2 = get_snapshot_store()
+            _snap2.put(
+                cache_key=key,
+                content_key=content_key,
+                op_key=op_key,
+                target_sig=sha256_of_file(target),
+                result=envelope,
+            )
+            envelope["_snapshot"] = {
+                "hit": False,
+                "key": key,
+                "content_key": content_key,
+                "note": (
+                    "Stored for reuse — repeat calls with the same bytes + "
+                    "verb/addr/count return this result without re-paying "
+                    "aaa."
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 — caching must never fail the run
+            logger.debug("[r2] snapshot store skipped: %s", exc)
+
+    return envelope
 
 
 # ---------------------------------------------------------------------------

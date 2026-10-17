@@ -244,6 +244,47 @@ open|resolved|wontfix|promoted — `promoted` requires the finding ID via
 that renders even when zero findings exist. Inspired by REA's unknown ledger
 (morluto/rea).
 
+### Analysis snapshot cache (`utils/snapshot_cache.py` + `auxiliaries/radare2.py`)
+
+Deterministic-lane memoization (REA-inspired). r2 analysis is a pure function
+of (target bytes, verb/addr/count, settings), so `run_r2` stores successful
+envelopes keyed on the target's **sha256** + op key (verb, addr, count,
+r2ghidra availability, output cap, timeout) and serves identical repeat
+queries verbatim — exploring a binary pays ``aaa`` once instead of once per
+call. Rules that keep it honest:
+
+- **Pure functions only.** Scanners (nmap/ffuf/masscan) deliberately don't
+  share this cache — their results are observations of a changing world (and
+  their job-log lane already persists per-job results). Errors are never
+  cached; a cached timeout is a lie about the next attempt.
+- **Content keys, not paths**: identical bytes rebuild-and-hit (gcc strips
+  comments — two different sources can compile to identical bytes and
+  legitimately share a snapshot); changed bytes miss automatically. No
+  invalidation problem for a read-only lane.
+- **Contextual fields are patched on hits**: a cached envelope's `target` is
+  rewritten to the current call's resolved path (identical bytes at a new
+  path must report the path the model actually asked about).
+- Storage: SQLite WAL at `run/analysis_snapshots.db` (scratch-store
+  conventions incl. root-ownership repair), TTL `SNAPSHOT_TTL_HOURS`
+  (default 168h, growth-bounding only), per-target cap
+  `SNAPSHOT_MAX_ENTRIES` (default 200, oldest evicted). `cache=False` skips
+  read+write; `refresh=True` recomputes and overwrites. Cache failures
+  degrade silently to a normal run — caching must never break a tool.
+
+### Capability doctor (`auxiliaries/framework_status.py:framework_doctor`)
+
+`framework_health` answers "is the harness alive" (Brain/Ollama/Chroma/ZAP/
+ids.db up/down). `framework_doctor` answers "can I actually run X" —
+REA-style per-provider probes returning `{available, reason, remediation}`:
+r2 + r2ghidra plugin + drop dir, jadx + java + apk dir, masscan + raw-socket
+(CAP_NET_RAW) capability, msfconsole/msfvenom + RPC port, PATH probes for
+nmap/ffuf/hydra/sqlmap, the secretary model on the Ollama host, and snapshot
+cache stats. Drill down with `provider=` (r2|jadx|masscan|msf|scanners|
+secretary_model|snapshot_cache). The remediation strings agree with the
+tools' own error paths (e.g. pdg's "run: r2pm -ci r2ghidra"), so the model
+reads the same fix from either side. Probes reuse existing module helpers
+(`_r2ghidra_available` etc.) so doctor and tools cannot drift.
+
 ### Per-turn tool budget (`utils/tool_budget.py`)
 
 A hard cap on tool executions per turn, enforced in the gateway so the lanes
