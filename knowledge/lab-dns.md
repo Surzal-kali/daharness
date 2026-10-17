@@ -42,9 +42,8 @@ kali                                          containers (workbench net)
 
 Host-only state the script (re)creates on a fresh install:
 `/etc/dnsmasq.d/lab.conf`, `/etc/systemd/system/dnsmasq.service.d/override.conf`
-(`After=docker.service` — the bridge gateway only exists after Docker starts;
-without this dnsmasq can lose the bind race at boot and stay down with no
-restart policy), and `systemctl enable dnsmasq` (the unit ships `disabled`).
+(`After=docker.service` + `Restart=on-failure`/`RestartSec=15` — see boot race
+below), and `systemctl enable dnsmasq` (the unit ships `disabled`).
 
 ## Operational notes
 
@@ -69,5 +68,18 @@ python -c "import socket; print(socket.gethostbyname('connected.htb'))"
 ```
 
 Troubleshooting: `journalctl -u dnsmasq` — the classic fresh-install failure
-is a bind error on 172.28.0.1 because the bridge isn't up yet (drop-in above
-fixes it); second classic is port 53 already taken (`ss -lntu 'sport = :53'`).
+is a bind error on 172.28.0.1 because the bridge isn't up yet. **Ordering alone
+does NOT fix this** (seen live 2026-10-17: dnsmasq failed at boot with
+`Cannot assign requested address` on a host where the drop-in was installed):
+the workbench bridge is created by `docker compose up -d`, not dockerd, so
+`docker.service` reaches active with no bridge in existence and `After=` is
+already satisfied. That's why the drop-in also carries `Restart=on-failure` +
+`RestartSec=15` — dnsmasq retries until compose brings the bridge — and the
+script itself waits up to `BRIDGE_WAIT_S` (default 30) for the gateway before
+binding. Second classic is port 53 already taken (`ss -lntu 'sport = :53'`).
+
+When dnsmasq is down, container-side symptom is total public-name resolution
+failure (Docker's 127.0.0.11 forwards to 172.28.0.1, which is dead — e.g.
+`Failed to resolve 'github.com'` in jupyter server logs), while kali itself
+still resolves fine through its own upstream path. Lab names fail in BOTH
+lanes' dnsmasq checks.

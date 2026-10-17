@@ -9,9 +9,10 @@
 # Writes (unconditionally — this script is the source of truth):
 #   /etc/dnsmasq.d/lab.conf                        — the dnsmasq config
 #   /etc/systemd/system/dnsmasq.service.d/override.conf — After=docker.service
-#     (the 172.28.0.1 bridge gateway only exists once Docker creates the
-#     workbench bridge; without this drop-in dnsmasq can fail its bind at
-#     boot on a fresh install where it starts before docker does)
+#     + Restart=on-failure (the 172.28.0.1 bridge gateway only exists once
+#     docker *compose* creates the workbench bridge — dockerd being up does
+#     not imply the bridge exists, so ordering alone can still lose the bind
+#     race at boot; on-failure retry closes that gap)
 #   then: enable + restart dnsmasq, and verify port 53 + resolution.
 #
 # The container side lives IN the repo and needs nothing here:
@@ -34,8 +35,16 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # The bridge gateway must exist BEFORE dnsmasq binds it (fresh-install trap).
+# Docker *compose* — not dockerd — creates the workbench bridge, so it can lag
+# docker.service and this script. Wait briefly for it; fail with guidance if
+# it never shows (BRIDGE_WAIT_S overrides the wait, 0 skips straight to fail).
+bridge_wait=${BRIDGE_WAIT_S:-30}
+for _ in $(seq 1 "$bridge_wait"); do
+    ip -br addr | grep -q "${BRIDGE_GW}/" && break
+    sleep 1
+done
 if ! ip -br addr | grep -q "${BRIDGE_GW}/"; then
-    echo "ERROR: ${BRIDGE_GW}/ not present on any interface." >&2
+    echo "ERROR: ${BRIDGE_GW}/ not present on any interface after ${bridge_wait}s." >&2
     echo "       The workbench bridge comes from docker compose — start it first:" >&2
     echo "         cd dockered && docker compose up -d" >&2
     exit 1
@@ -69,11 +78,20 @@ chmod 644 "$LAB_CONF"
 mkdir -p "$DROPIN_DIR"
 cat > "$DROPIN_CONF" <<'EOF'
 [Unit]
-# 172.28.0.1 only exists once Docker creates the workbench bridge
+# 172.28.0.1 only exists once docker *compose* creates the workbench bridge —
+# docker.service can be fully active with no bridge yet, so ordering alone
+# can still lose the bind race at boot.
 After=docker.service
+
+[Service]
+# First start after boot may precede `docker compose up -d`; retry until the
+# bridge appears instead of staying failed with no restart policy.
+Restart=on-failure
+RestartSec=15
 EOF
 
 # ── 3. enable + (re)start ────────────────────────────────────────────────────
+systemctl daemon-reload
 systemctl enable dnsmasq
 systemctl restart dnsmasq
 
