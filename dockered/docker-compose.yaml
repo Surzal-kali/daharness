@@ -143,6 +143,14 @@ services:
       # after workbench, so it wins the default route — 172.28.0.0/24 still
       # routes via the workbench interface for framework traffic.
       egress:
+    # DNS: kali-side dnsmasq at the pinned workbench bridge gateway (ipam:
+    # 172.28.0.0/24). It serves kali's /etc/hosts lab entries so notebook
+    # resolution matches the host; Docker's embedded resolver (127.0.0.11)
+    # still stays in charge of container names on the workbench network.
+    # dnsmasq config: kali's /etc/dnsmasq.d/lab.conf (order-after-docker
+    # systemd drop-in included — see git history / dnsmasq setup notes).
+    dns:
+      - 172.28.0.1
     volumes:
       - /home/kali/github/daharness:/home/jovyan/framework
       - /home/kali/github/daharness/dabooks:/home/jovyan/work       # notebooks — on host, git init here for version control
