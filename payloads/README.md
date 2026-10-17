@@ -123,9 +123,6 @@ here is built around:
   before the binary runs, exact names via `msfvenom_menu(kind='encrypt')`).
   Emits ENCRYPTED RAW SHELLCODE only — the decrypt-and-execute wrapper is the
   `encoders/` loader lane's job, so pair the artifacts or they just sit there.
-- **Meterpreter payloads are hard-blocked, mirroring `dispatch_metasploit`**
-  — the in-framework handler lane can never catch their callback
-  (AutoLoadExtensions serialization). Pure shell payloads only.
 - **`start_handler=True`** starts a persistent `exploit/multi/handler` job
   via `MetasploitClient._start_handler_job` — the shared handler-start
   primitive extracted from `_execute_module_impl` so both the dispatch lane
