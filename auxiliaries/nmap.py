@@ -111,6 +111,7 @@ def _nmap_target_argv(target: str) -> List[str]:
     "script name with nmap_scripts first, then pass --script <name> in "
     "options.",
     next_hints=["nmap_status", "nmap_scripts"],
+    untrusted_target=True,
 )
 def run_nmap(target: str, options: str = "-Pn -sV") -> Dict[str, Any]:
     """Launch nmap against ``target`` and return immediately.
@@ -231,6 +232,7 @@ def _nmap_status_digest(result: Dict[str, Any]) -> Dict[str, Any]:
     "poll repeatedly or automatically until the scan finishes.",
     next_hints=["nmap_status", "report_finding"],
     result_digest=lambda r: _nmap_status_digest(r),
+    untrusted_target=True,
 )
 def nmap_status(job_id: str) -> Dict[str, Any]:
     """Poll the progress of a scan launched by ``run_nmap``.

@@ -1236,6 +1236,7 @@ class MetasploitClient:
         "'msf:' handle returned by dispatch_metasploit (e.g. 'msf:1'). The session "
         "stays alive for follow-up commands.",
         accepted_handle_kinds=["msf"],
+        untrusted_target=True,
     )
     async def interact_session(self, handle: str, command: str):
         """

@@ -283,6 +283,7 @@ def ssh_connect(hostname: str, username: str, password: str, port: int = 22):
     "Execute a command on an existing SSH session. Pass the 'ssh:' handle "
     "returned by ssh_connect (e.g. 'ssh:sess-0001').",
     accepted_handle_kinds=["ssh"],
+    untrusted_target=True,
 )
 def ssh_exec(handle: str, command: str):
     """

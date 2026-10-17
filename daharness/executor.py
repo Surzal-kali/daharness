@@ -87,12 +87,16 @@ class ExecutorMixin:
             # the script itself; _execute_local_script also enforces the
             # ALLOWED_TOOL_ROOTS path check.  Local scripts have no Brain
             # session concept, so session_id is ignored here.
-            return await self._execute_local_script(
-                manifest.implementation_path, arguments
+            return self._stamp_provenance(
+                manifest,
+                await self._execute_local_script(manifest.implementation_path, arguments),
             )
 
         if manifest.transport == TransportType.BRAIN_DISPATCH:
-            return await self._execute_brain_tool(manifest.module_id, arguments, session_id=session_id)
+            return self._stamp_provenance(
+                manifest,
+                await self._execute_brain_tool(manifest.module_id, arguments, session_id=session_id),
+            )
 
         if manifest.transport == TransportType.MCP_RPC:
             # MCP_RPC tools (e.g. MetasploitClient.dispatch_metasploit) are async
@@ -102,9 +106,44 @@ class ExecutorMixin:
             # fallback path. The previous stub returned "pending" without ever
             # invoking the method, which silently dropped every exploit
             # execution (the module never fired, no session was created).
-            return await self._execute_brain_tool(manifest.module_id, arguments, session_id=session_id)
+            return self._stamp_provenance(
+                manifest,
+                await self._execute_brain_tool(manifest.module_id, arguments, session_id=session_id),
+            )
 
         raise ValueError(f"Unsupported transport type: {manifest.transport}")
+
+    @staticmethod
+    def _stamp_provenance(manifest: ToolManifest, result: Any) -> Any:
+        """Stamp result envelopes from untrusted-target tools with provenance.
+
+        Tools decorated ``@framework_tool(..., untrusted_target=True)`` produce
+        results that embed ANALYSIS-TARGET content: page HTML and headers,
+        shell output, service banners, binary strings, scanner log lines. A
+        target can write that text to look like instructions to the agent.
+        Every envelope from such tools carries::
+
+            {"_provenance": {"untrusted_target": true, "source": "analysis_target"}}
+
+        The stamp is applied to BOTH the transport envelope and the tool's own
+        result dict (when it's a dict) — the projection layer unwraps the
+        envelope before digesting/paging, so the inner copy is the one that
+        survives into the model context and the scratch store.  ``setdefault``
+        keeps the operation idempotent for nested re-dispatches.
+
+        Mirrors REA's ``returnsTargetContent`` contract
+        (morluto/rea docs/mcp-contracts.md).
+        """
+        if not getattr(manifest, "untrusted_target", False):
+            return result
+        if not isinstance(result, dict):
+            return result
+        stamp = {"untrusted_target": True, "source": "analysis_target"}
+        result.setdefault("_provenance", stamp)
+        inner = result.get("result")
+        if isinstance(inner, dict):
+            inner.setdefault("_provenance", stamp)
+        return result
 
     def _resolve_brain_session(self, session_id: str) -> int:
         """Map a caller session/agent id to the integer the Brain wire protocol

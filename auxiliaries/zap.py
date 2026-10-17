@@ -1229,6 +1229,7 @@ def zap_active_scan_status(scan_id: str, base_url: Optional[str] = None) -> Dict
 @framework_tool(
     "List ZAP alerts (optionally filtered by URL prefix and risk level).",
     next_hints=["zap_alert_message", "report_finding"],
+    untrusted_target=True,
 )
 @_zap_error_guard
 def zap_alerts(base_url: Optional[str] = None,
@@ -1264,6 +1265,7 @@ def zap_alerts(base_url: Optional[str] = None,
 @framework_tool(
     "Get an alert's metadata plus the full HTTP request/response that triggered it.",
     next_hints=["report_finding"],
+    untrusted_target=True,
 )
 @_zap_error_guard
 def zap_alert_message(alert_id: str) -> Dict[str, Any]:
@@ -1279,7 +1281,8 @@ def zap_alert_message(alert_id: str) -> Dict[str, Any]:
 
 @framework_tool(
     "Grep the raw HTTP response for a previously-spidered URL using a regex. "
-    "This is the ZAP-as-grep tool: pass any regex, get all matches back."
+    "This is the ZAP-as-grep tool: pass any regex, get all matches back.",
+    untrusted_target=True,
 )
 @_zap_error_guard
 def zap_history_regex(target: str, pattern: str,

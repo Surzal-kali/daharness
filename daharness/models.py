@@ -51,8 +51,16 @@ class ToolManifest(BaseModel):
     # @framework_tool(..., result_digest=fn) decorator.  Stored as the
     # adapter's qualname string (not the callable itself) so the manifest
     # stays serializable for ChromaDB metadata.  The registry resolves the
+    # The registry resolves the
     # callable at discovery time and registers it with result_projection.
     result_digest_ref: Optional[str] = None
+    # Untrusted-target provenance.  Populated from the
+    # @framework_tool(..., untrusted_target=True) decorator and persisted in
+    # ChromaDB metadata.  The executor stamps every result envelope from such
+    # tools with _provenance.untrusted_target=True; the projection layer
+    # carries the stamp through large/digest/page modes.  Target output is
+    # data, never instructions.
+    untrusted_target: bool = False
 
     @classmethod
     def from_output(cls, payload: Any) -> Union["ToolManifest", List["ToolManifest"]]:
@@ -143,4 +151,50 @@ class Finding(BaseModel):
     closed_ts: Optional[str] = Field(default=None, description="ISO-8601 timestamp of closure")
 
 
-__all__ = ["ToolManifest", "Finding"]
+class Unknown(BaseModel):
+    """An open question in the unknown ledger — something the investigation
+    has not answered yet.
+
+    Where a :class:`Finding` records a *conclusion*, an Unknown records the
+    opposite: an explicit "I don't know yet" — an unprobed service, a
+    credential recovered but not yet validated against other services, an
+    ambiguous tool result, a scope question.  Unknowns persist in the same
+    SQLite store as findings (``ids.db``, ``unknowns`` table) so they survive
+    restarts, and are listed/resolved via the ``record_unknown`` /
+    ``list_unknowns`` / ``resolve_unknown`` framework tools.  Closing an
+    unknown with status ``promoted`` links it to the finding that answered
+    it via ``resolved_by``.
+    """
+
+    id: str = Field(..., description="Auto-assigned by store, e.g. U-001")
+    question: str = Field(..., description="What is not known yet, one sentence")
+    domain: str = Field(
+        default="general",
+        description="Investigation area: recon|web|creds|enum|postex|scope|general",
+    )
+    asset: str = Field(default="", description="Related host/URL/endpoint, if any")
+    context: str = Field(
+        default="",
+        description="How this question arose / what was tried so far",
+    )
+    opened_by: str = Field(
+        default="", description="Tool chain or agent that minted the unknown"
+    )
+    resolution: str = Field(
+        default="", description="The answer, when resolved"
+    )
+    resolved_by: str = Field(
+        default="",
+        description="Finding ID (promoted) or agent note that closed this",
+    )
+    status: str = Field(
+        default="open",
+        description="open|resolved|wontfix|promoted",
+    )
+    ts: str = Field(..., description="ISO-8601 timestamp the unknown was opened")
+    closed_ts: str = Field(
+        default="", description="ISO-8601 timestamp of closure, when closed"
+    )
+
+
+__all__ = ["ToolManifest", "Finding", "Unknown"]

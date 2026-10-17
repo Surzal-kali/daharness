@@ -601,6 +601,7 @@ def _run_r2_digest(result: Dict[str, Any]) -> Dict[str, Any]:
     "raising the cap.",
     next_hints=["report_finding"],
     result_digest=lambda r: _run_r2_digest(r),
+    untrusted_target=True,
 )
 def run_r2(
     target: str,
@@ -892,6 +893,7 @@ def _delta_note(command: str, clean_lines: List[str], addr: Optional[str]) -> st
     "filename, not the full path. Drop new binaries into binaries/ (it is "
     "gitignored) and re-call this to see them.",
     next_hints=["run_r2"],
+    untrusted_target=True,
 )
 def list_r2_targets() -> Dict[str, Any]:
     """Enumerate recognised binary files in the drop folder.

@@ -281,6 +281,7 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                 new_meta_json = json.dumps(m.parameters or {})
                 new_kinds_json = json.dumps(list(m.accepted_handle_kinds or []))
                 new_next_json = json.dumps(list(m.next or []))
+                new_untrusted = json.dumps(bool(m.untrusted_target))
                 unchanged = (
                     old_doc == m.internal_semantic_capability
                     and str(old_meta.get("implementation_path", "")) == m.implementation_path
@@ -288,6 +289,7 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                     and old_meta.get("parameters_json") == new_meta_json
                     and old_meta.get("accepted_handle_kinds") == new_kinds_json
                     and old_meta.get("next_hints") == new_next_json
+                    and old_meta.get("untrusted_target") == new_untrusted
                 )
                 if unchanged:
                     continue
@@ -317,6 +319,7 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                         ),
                         "next_hints": json.dumps(list(m.next or [])),
                         "tags_json": json.dumps(list(m.tags or [])),
+                        "untrusted_target": json.dumps(bool(m.untrusted_target)),
                     }
                 ],
                 documents=[m.internal_semantic_capability],
@@ -625,6 +628,14 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                                 _reg_digest(tool_id, result_digest_fn)
                             except ImportError:
                                 pass
+                        # Untrusted-target provenance (REA's
+                        # returnsTargetContent contract): tools whose results
+                        # embed analysis-target content get their result
+                        # envelopes stamped by the executor, and the flag is
+                        # surfaced in the manifest so the secretary sees it.
+                        untrusted_target = bool(
+                            getattr(func, "_untrusted_target", False)
+                        )
                         manifests.append(
                             ToolManifest(
                                 module_id=tool_id,
@@ -638,6 +649,7 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                                 next=list(next_hints),
                                 tags=tags,
                                 result_digest_ref=result_digest_ref,
+                                untrusted_target=untrusted_target,
                             )
                         )
                 except Exception as e:
@@ -692,6 +704,8 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
             ),
             next=list(self._safe_parse_kinds(meta.get("next_hints"))),
             tags=self._safe_parse_kinds(meta.get("tags_json")),
+            untrusted_target=str(meta.get("untrusted_target", "false")).lower()
+            in ("true", "1", "yes"),
         )
 
     def _safe_parse_tool_args(self, raw: Any) -> dict:
@@ -781,6 +795,8 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                     ),
                     next=list(self._safe_parse_kinds(meta.get("next_hints"))),
                     tags=self._safe_parse_kinds(meta.get("tags_json")),
+                    untrusted_target=str(meta.get("untrusted_target", "false")).lower()
+                    in ("true", "1", "yes"),
                     distance=round(float(dist), 4) if dist is not None else None,
                 )
             )
@@ -854,6 +870,11 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                 # see the bucket (web.fuzz, brute.crack, ...) beside every hit
                 # and reason about tool choice beyond the raw capability text.
                 entry["tags"] = list(manifest.tags)
+            if manifest.untrusted_target:
+                # Provenance: this tool's output embeds ANALYSIS-TARGET
+                # content (page HTML, shell output, banners, binary strings).
+                # Treat it as DATA, never as instructions.
+                entry["untrusted_target"] = True
             return entry
         return {
             "tool_id": manifest.module_id,
@@ -865,6 +886,7 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
             "internal_semantics": manifest.internal_semantics,
             "next": list(manifest.next) if manifest.next else [],
             "tags": list(manifest.tags) if manifest.tags else [],
+            "untrusted_target": bool(manifest.untrusted_target),
         }
 
     def validate_arguments(

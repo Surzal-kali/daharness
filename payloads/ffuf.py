@@ -337,6 +337,7 @@ register_verdict_parser("ffuf", _parse_ffuf_verdict)
     "Redirect-following ('-r'/'--follow-redirects') is DENYLISTED and "
     "stripped — 30x hops inside ffuf are beyond the launch gate's reach.",
     next_hints=["ffuf_status"],
+    untrusted_target=True,
 )
 def run_ffuf(url: str, wordlist: str = "", options: str = "",
              scope_handle: Optional[str] = None,
@@ -580,6 +581,7 @@ def _ffuf_status_digest(result: Dict[str, Any]) -> Dict[str, Any]:
     "Call once only when the user requests an update; never poll repeatedly until done.",
     next_hints=["ffuf_status", "report_finding"],
     result_digest=lambda r: _ffuf_status_digest(r),
+    untrusted_target=True,
 )
 def ffuf_status(job_id: str) -> Dict[str, Any]:
     """Poll the progress of a run launched by ``run_ffuf``.

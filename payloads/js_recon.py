@@ -211,6 +211,7 @@ def _extract_secrets(text: str) -> List[Dict[str, str]]:
     "report confirmed secrets via report_finding. Cross-host bundles are "
     "scope-gate checked individually and skipped when out of scope.",
     next_hints=["run_ffuf", "report_finding", "zap_open", "probe_web"],
+    untrusted_target=True,
 )
 def extract_js_routes(
     url: str,

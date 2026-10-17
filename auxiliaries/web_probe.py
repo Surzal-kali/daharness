@@ -177,6 +177,7 @@ _ws = re.compile(r"\s+")
     "URLs (probed as-is). Bounded and non-blocking-friendly: caps at 256 "
     "targets / 8 ports / 1024 requests, wall-clock capped.",
     next_hints=["run_ffuf", "zap_open", "extract_js_routes", "report_finding"],
+    untrusted_target=True,
 )
 def probe_web(
     targets: str,

@@ -123,6 +123,9 @@ Framework memory — cross-agent and harness memories you want stored on the ser
 Findings store (in the framework) — engagement and hunt data: findings from targets.
 
 
+Unknown ledger (in the framework, alongside findings) — open questions: things NOT yet answered (unprobed services, creds recovered but not yet validated against other services, ambiguous results, scope questions). record_unknown mints one (domains: recon|web|creds|enum|postex|scope|general); list_unknowns (default: open only) sweeps what remains; resolve_unknown closes each (resolved | wontfix | promoted — promoted passes the finding ID it became). Work the ledger turn-by-turn; an open ledger is the honest state of the engagement when nothing is confirmed yet.
+
+
 The codebase — the shell + file-management tooling that powers the framework; has thorough docs and docstrings; commit to the schema and the codebase's method.
 
 txt files — gitignored; usable, as described, to ledger findings.

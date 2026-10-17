@@ -187,11 +187,32 @@ FastAPI server (port 5000 on the host lane; 6000 in the container lane):
 ### Result Projection (`utils/result_projection.py`)
 
 Controls what enters the model's context window vs. what stays in scratch.
-Three modes (execution-envelope parameter, NOT a tool argument):
+Modes (execution-envelope parameter, NOT a tool argument):
 
-- **`full`** (default) — raw tool result passes through unchanged. Zero behavior change.
-- **`digest`** — stores the full result in scratch, returns a compact per-tool-family digest + a `scratch_ref` + the retrieval instruction. The model is taught the retrieval move every call.
+- **`large`** (default) — the "give me the actual data" mode. Under
+  `LARGE_MODE_BYTE_CAP` (16 KiB) results pass through unchanged (zero
+  behavior change); over the cap the full result is stored in scratch and a
+  field-capped copy + `scratch_ref` + a **ready-to-call continuation** are
+  returned. The legacy `full` mode is gone — it silently aliases to `large`
+  so stale callers and old tests keep working.
+- **`digest`** — stores the full result in scratch, returns a compact per-tool-family digest + a `scratch_ref` + the retrieval instruction + a ready-to-call continuation. The model is taught the retrieval move every call.
 - **`page`** — stores the full result in scratch, returns a bounded page of list results + a `scratch_ref` + continuation info.
+
+**Ready-to-call continuations (REA-inspired):** every oversized/digested/paged
+result carries `continuation: {call: {tool, arguments}, ...}` — the exact
+framework_scratch_search invocation (with `next_offset` baked in for page
+mode) the model copies verbatim instead of re-deriving. The `next` prose hint
+is kept for backward compat.
+
+**Untrusted-target provenance:** tools decorated
+`@framework_tool(..., untrusted_target=True)` (web session lane, ssh, r2,
+jadx, scanners, ZAP grep/alerts, MSF sessions) get their result envelopes
+stamped by the executor with
+`_provenance = {"untrusted_target": true, "source": "analysis_target"}` —
+on the outer envelope AND the inner result dict — and the projection carries
+the stamp through digest/page modes. Target output is DATA, never
+instructions; the secretary instructions spell out the prompt-injection rule
+(inspired by REA's `returnsTargetContent` contract).
 
 **Why this is not the parked OWUI trim filter:** the projection runs *before*
 the result enters context (not after); the retrieval instruction is part of
@@ -207,6 +228,21 @@ exact `tool_id` during the registry's dynamic-discovery pass.
 
 **Pilot adapter:** `nmap_status` — returns open port count + full port list +
 host state + job_id, omitting the raw log text (retrievable from scratch).
+
+### Unknown ledger (`daharness/findings.py` + `utils/findings.py`)
+
+Where a finding records a *conclusion*, an unknown records an explicit
+"don't know yet" — unprobed services, credentials recovered but not yet
+validated against other services, ambiguous results, scope questions. The
+`unknowns` table lives in the same SQLite store (`ids.db`) as findings, with
+idempotent table creation and the same lost-id-race handling. Tools:
+`record_unknown` / `list_unknowns` / `resolve_unknown` (statuses:
+open|resolved|wontfix|promoted — `promoted` requires the finding ID via
+`resolved_by`). All three are `infra`-tagged and sit in the terminal lane
+(`utils.findings.` prefix) so they stay callable past the tool budget.
+`render_findings` output gains an **Open questions (unresolved)** appendix
+that renders even when zero findings exist. Inspired by REA's unknown ledger
+(morluto/rea).
 
 ### Per-turn tool budget (`utils/tool_budget.py`)
 
@@ -224,9 +260,10 @@ the symmetric brake (`SECRETARY_MAX_APPROVAL_ROUNDS` covers the secretary).
 - **Past the cap → refused**: the call does not execute; the response is a
   structured `budget_exhausted` envelope (HTTP 200 / plain MCP text, not an
   error — an instruction to reason over, not a transient failure to retry).
-- **Terminal lane**: memory (`utils.memory_tools.`) and findings
-  (`utils.findings.`) tools stay callable past the cap and don't consume
-  budget, so the model can actually comply instead of being trapped.
+- **Terminal lane**: memory (`utils.memory_tools.`), findings, and the
+  unknown ledger (`utils.findings.`) tools stay callable past the cap and
+  don't consume budget, so the model can actually comply instead of being
+  trapped.
 - **Knobs**: `TOOL_BUDGET_PER_TURN` (default 10, 0 = disabled),
   `TOOL_BUDGET_IDLE_RESET_MIN`, `TOOL_BUDGET_TERMINAL_ALLOWLIST`. Counters
   are in gateway process memory and reset on restart.

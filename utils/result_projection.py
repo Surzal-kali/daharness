@@ -205,11 +205,18 @@ def project_result(
     # The stored scratch payload and the envelope the model sees must both
     # carry the tool's own fields.
     envelope_status = ""
+    provenance: Optional[Dict[str, Any]] = None
     if "result" in result and "status" in result:
         envelope_status = str(result.get("status", "")).lower()
+        # Capture the untrusted-target provenance stamp the executor placed
+        # on the envelope and/or the inner result before unwrapping — digest
+        # and page envelopes are fresh dicts and would otherwise drop it.
+        provenance = result.get("_provenance") or provenance
         result = result["result"]
         if not isinstance(result, dict):
             return result
+        if result.get("_provenance"):
+            provenance = result["_provenance"]
 
     # Failed results are always returned in full — a digest of an error
     # loses the error text the model needs to self-correct.  This covers
@@ -253,11 +260,13 @@ def project_result(
     scratch_ref = scratch_info["scratch_ref"]
 
     if mode == "digest":
-        return _build_digest(result, tool_id, scratch_ref, scratch_info)
+        return _build_digest(result, tool_id, scratch_ref, scratch_info,
+                             provenance=provenance)
     elif mode == "page":
         return _build_page(
             result, tool_id, scratch_ref, scratch_info,
             offset=page_offset, limit=page_limit,
+            provenance=provenance,
         )
     else:
         # Unknown mode — degrade to large (capped, never unbounded).
@@ -376,6 +385,17 @@ def _project_large(
             f"Call framework_scratch_search with scratch_ref='{scratch_ref}' "
             f"to retrieve the full uncapped output."
         ),
+        "continuation": {
+            "call": {
+                "tool": "framework_scratch_search",
+                "arguments": {"scratch_ref": scratch_ref},
+            },
+            "note": (
+                "Ready-to-call retrieval for the full uncapped payload. "
+                "Retrieved payloads are field-capped like this one; use "
+                "filter/regex/fields/limit arguments to narrow."
+            ),
+        },
         "stored_bytes": scratch_info.get("stored_bytes", 0),
         "original_size_bytes": result_size,
         "byte_cap": _LARGE_MODE_BYTE_CAP,
@@ -394,6 +414,7 @@ def _build_digest(
     tool_id: str,
     scratch_ref: str,
     scratch_info: Dict[str, Any],
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build a digest envelope using a registered adapter or the naive fallback."""
     adapter = get_digest_adapter(tool_id)
@@ -422,6 +443,19 @@ def _build_digest(
         envelope["row_hint"] = row_hint
     envelope["tool_id"] = tool_id
     envelope["stored_bytes"] = scratch_info.get("stored_bytes", 0)
+    envelope["continuation"] = {
+        "call": {
+            "tool": "framework_scratch_search",
+            "arguments": {"scratch_ref": scratch_ref},
+        },
+        "note": (
+            "Ready-to-call retrieval for the full uncapped output. Narrow "
+            "with filter/regex/fields/limit arguments instead of pulling "
+            "everything — retrieved payloads are field-capped too."
+        ),
+    }
+    if provenance:
+        envelope["_provenance"] = provenance
     return envelope
 
 
@@ -435,6 +469,7 @@ def _build_page(
     *,
     offset: int,
     limit: int,
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build a bounded page envelope from the result's list-bearing fields."""
     # Find the primary list field to page.  Priority: rows, open_ports,
@@ -477,17 +512,38 @@ def _build_page(
     envelope["limit"] = limit
     envelope["tool_id"] = tool_id
 
-    # Continuation: how to get the next page.
+    # Continuation: how to get the next page.  Two forms:
+    # - ``next``: human-readable instruction (kept for backward compat).
+    # - ``continuation``: a READY-TO-CALL dict — exact tool name + exact
+    #   arguments (with next_offset).  The model copies it verbatim instead
+    #   of reconstructing the follow-up call, which is where small models
+    #   drop the offset and loop on page 1.  Mirrors REA's
+    #   details.reported_limits.continuation.
     next_offset = offset + limit if limit > 0 and offset + limit < total else None
     if next_offset is not None:
         envelope["next"] = (
             f"Call framework_scratch_search with scratch_ref='{scratch_ref}' "
             f"offset={next_offset} limit={limit} to get the next page."
         )
+        envelope["continuation"] = {
+            "call": {
+                "tool": "framework_scratch_search",
+                "arguments": {
+                    "scratch_ref": scratch_ref,
+                    "offset": next_offset,
+                    "limit": limit,
+                },
+            },
+            "next_offset": next_offset,
+            "note": "Ready-to-call: copy arguments verbatim for the next page.",
+        }
     else:
         envelope["next"] = (
             f"End of results. Full output available at {scratch_ref}."
         )
+
+    if provenance:
+        envelope["_provenance"] = provenance
 
     return envelope
 

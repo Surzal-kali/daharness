@@ -297,6 +297,7 @@ def _session_digest(result: Dict[str, Any]) -> Dict[str, str]:
         "report_finding",
     ],
     result_digest=_session_digest,
+    untrusted_target=True,
 )
 def session_get(
     url: str,
@@ -344,6 +345,7 @@ def session_get(
         "report_finding",
     ],
     result_digest=_session_digest,
+    untrusted_target=True,
 )
 def session_post(
     url: str,
@@ -394,6 +396,7 @@ def session_post(
     "to keep it in the vault). Per-hop scope-gated like all framework HTTP.",
     next_hints=["session_get", "jar_state", "report_finding"],
     result_digest=_session_digest,
+    untrusted_target=True,
 )
 def session_request(
     method: str,
@@ -453,6 +456,7 @@ UPLOAD_MAX_BYTES = int(os.getenv("SESSION_UPLOAD_MAX_MB", "64")) * 1024 * 1024
     ],
     tags=["exploit.web", "web.auth"],
     result_digest=_session_digest,
+    untrusted_target=True,
 )
 def session_upload(
     url: str,

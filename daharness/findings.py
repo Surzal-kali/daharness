@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
-from .models import Finding
+from .models import Finding, Unknown
 from constants import resolve_workspace_root
 
 _DEFAULT_DB = str(Path(__file__).resolve().parent.parent / "ids.db")
@@ -220,6 +220,29 @@ class FindingStore:
             )
             """
         )
+        # --- unknown ledger (open questions, REA-style) -------------------
+        # A Finding records a conclusion; an Unknown records an explicit "I
+        # don't know yet" — an unprobed service, a credential not yet
+        # validated against other services, an ambiguous result, a scope
+        # question.  Same DB, separate table, so render_findings stays a
+        # conclusions report and the ledger never pollutes it.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS unknowns (
+                id          TEXT PRIMARY KEY,
+                question    TEXT NOT NULL,
+                domain      TEXT NOT NULL DEFAULT 'general',
+                asset       TEXT,
+                context     TEXT,
+                opened_by   TEXT,
+                resolution  TEXT,
+                resolved_by TEXT,
+                status      TEXT NOT NULL DEFAULT 'open',
+                ts          TEXT NOT NULL,
+                closed_ts   TEXT
+            )
+            """
+        )
         # --- migrations: add lifecycle columns to pre-existing tables ---
         # ALTER TABLE ... ADD COLUMN is idempotent-safe: we check the existing
         # columns first and only add the ones that are missing.  This lets the
@@ -241,6 +264,163 @@ class FindingStore:
                     f"ALTER TABLE findings ADD COLUMN {col_name} {col_def}"
                 )
         self.conn.commit()
+
+    # -- unknown ledger (open questions) -----------------------------------
+
+    _VALID_UNKNOWN_DOMAINS = {
+        "recon", "web", "creds", "enum", "postex", "scope", "general",
+    }
+    _VALID_UNKNOWN_STATUSES = {"open", "resolved", "wontfix", "promoted"}
+
+    def add_unknown(
+        self,
+        question: str,
+        domain: str = "general",
+        asset: str = "",
+        context: str = "",
+        opened_by: str = "",
+    ) -> Unknown:
+        """Record an open question and return the minted Unknown (U-001 style id)."""
+        domain = (domain or "general").strip().lower()
+        if domain not in self._VALID_UNKNOWN_DOMAINS:
+            raise ValueError(
+                f"Invalid domain {domain!r}. Must be one of: "
+                f"{', '.join(sorted(self._VALID_UNKNOWN_DOMAINS))}"
+            )
+        ts = datetime.now(timezone.utc).isoformat()
+
+        # Same lost-id race handling as findings.add: concurrent writers
+        # (gateway + secretary + MCP clients share ids.db) can compute the
+        # same U-id; the PRIMARY KEY turns that into a loud IntegrityError
+        # and we recount/retry.
+        last_exc: Optional[BaseException] = None
+        unknown: Optional[Unknown] = None
+        for _attempt in range(10):
+            cur = self.conn.execute("SELECT COUNT(*) FROM unknowns")
+            unknown_id = f"U-{cur.fetchone()[0] + 1:03d}"
+            unknown = Unknown(
+                id=unknown_id,
+                question=question,
+                domain=domain,
+                asset=asset or "",
+                context=context or "",
+                opened_by=opened_by or "",
+                ts=ts,
+            )
+            try:
+                with self.conn:  # atomic INSERT + commit
+                    self.conn.execute(
+                        """
+                        INSERT INTO unknowns
+                            (id, question, domain, asset, context, opened_by,
+                             resolution, resolved_by, status, ts, closed_ts)
+                        VALUES (?, ?, ?, ?, ?, ?, '', '', 'open', ?, '')
+                        """,
+                        (
+                            unknown.id,
+                            unknown.question,
+                            unknown.domain,
+                            unknown.asset,
+                            unknown.context,
+                            unknown.opened_by,
+                            unknown.ts,
+                        ),
+                    )
+                return unknown
+            except sqlite3.IntegrityError:
+                unknown.id = f"U-{uuid4()}"  # lost the id race - retry
+            except sqlite3.OperationalError as exc:
+                last_exc = exc  # e.g. 'database is locked' after busy_timeout
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("could not assign a unique unknown ID after retries")
+
+    @staticmethod
+    def _row_to_unknown(row) -> Unknown:
+        return Unknown(
+            id=row["id"],
+            question=row["question"],
+            domain=row["domain"],
+            asset=row["asset"] or "",
+            context=row["context"] or "",
+            opened_by=row["opened_by"] or "",
+            resolution=row["resolution"] or "",
+            resolved_by=row["resolved_by"] or "",
+            status=row["status"],
+            ts=row["ts"],
+            closed_ts=row["closed_ts"] or "",
+        )
+
+    def unknowns(
+        self,
+        status: Optional[str] = None,
+        domain: Optional[str] = None,
+        asset: Optional[str] = None,
+        include_closed: bool = True,
+    ) -> List[Unknown]:
+        """List unknowns, oldest first, optionally filtered.
+
+        ``include_closed=False`` returns only open unknowns — the "what
+        haven't we answered yet" view.  Statuses: open|resolved|wontfix|promoted.
+        """
+        rows = self.conn.execute(
+            "SELECT * FROM unknowns ORDER BY CAST(SUBSTR(id, 3) AS INTEGER) ASC"
+        ).fetchall()
+        items = [self._row_to_unknown(r) for r in rows]
+        if status:
+            items = [u for u in items if u.status == status]
+        if domain:
+            items = [u for u in items if u.domain == domain.lower()]
+        if asset:
+            items = [u for u in items if asset.lower() in u.asset.lower()]
+        if not include_closed:
+            items = [u for u in items if u.status == "open"]
+        return items
+
+    def get_unknown(self, unknown_id: str) -> Optional[Unknown]:
+        row = self.conn.execute(
+            "SELECT * FROM unknowns WHERE id = ?", (unknown_id,)
+        ).fetchone()
+        return self._row_to_unknown(row) if row else None
+
+    def unknown_count(self) -> int:
+        cur = self.conn.execute("SELECT COUNT(*) FROM unknowns")
+        return cur.fetchone()[0]
+
+    def resolve_unknown(
+        self,
+        unknown_id: str,
+        status: str,
+        resolution: str = "",
+        resolved_by: str = "",
+    ) -> Optional[Unknown]:
+        """Resolve/close an unknown.
+
+        status: resolved (answered), wontfix (never pursuing), promoted
+        (answered AND became a finding — pass the finding ID via ``resolved_by``
+        so the report can link them).
+        """
+        status = (status or "").strip().lower()
+        if status not in self._VALID_UNKNOWN_STATUSES:
+            raise ValueError(
+                f"Invalid status {status!r}. Must be one of: "
+                f"{', '.join(sorted(self._VALID_UNKNOWN_STATUSES))}"
+            )
+        if status == "promoted" and not resolved_by:
+            raise ValueError("promoted requires resolved_by (the finding ID it became)")
+        closed_ts = datetime.now(timezone.utc).isoformat()
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                UPDATE unknowns
+                SET status = ?, resolution = ?, resolved_by = ?, closed_ts = ?
+                WHERE id = ?
+                """,
+                (status, resolution, resolved_by, closed_ts, unknown_id),
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_unknown(unknown_id)
 
     # -- write --------------------------------------------------------------
 
@@ -493,30 +673,42 @@ class FindingStore:
         if not include_closed:
             findings = [f for f in findings if f.status == "open"]
 
-        if not findings:
+        # Open questions from the unknown ledger — fetched up front so the
+        # appendix can render even when no findings exist (early-days
+        # engagement: nothing confirmed yet, but threads are already open).
+        try:
+            open_unknowns = self.unknowns(include_closed=False)
+        except Exception:
+            open_unknowns = []
+
+        if not findings and not open_unknowns:
             return "_(no findings reported yet)_"
 
-        # Status breakdown for the header
-        open_count = sum(1 for f in findings if f.status == "open")
-        closed_count = len(findings) - open_count
-        header = f"# Findings Report ({len(findings)} finding(s)"
-        if closed_count:
-            header += f", {open_count} open / {closed_count} closed"
-        header += ")"
+        if not findings:
+            # Nothing confirmed yet, but the ledger has open threads — render
+            # the report with the appendix instead of a bare no-findings line.
+            lines = ["# Findings Report (no findings reported yet)", ""]
+        else:
+            # Status breakdown for the header
+            open_count = sum(1 for f in findings if f.status == "open")
+            closed_count = len(findings) - open_count
+            header = f"# Findings Report ({len(findings)} finding(s)"
+            if closed_count:
+                header += f", {open_count} open / {closed_count} closed"
+            header += ")"
+            lines = [header, ""]
 
-        lines = [header, ""]
-
-        # Summary table
-        lines.append("| ID | Title | Severity | CWE | Asset | Status |")
-        lines.append("|---|---|---|---|---|---|")
-        for f in findings:
-            status_cell = f.status
-            if f.superseded_by:
-                status_cell += f" → {f.superseded_by}"
-            lines.append(
-                f"| {f.id} | {f.title} | {f.severity} | {f.cwe or '—'} | {f.asset} | {status_cell} |"
-            )
-        lines.append("")
+            # Summary table
+            lines.append("| ID | Title | Severity | CWE | Asset | Status |")
+            lines.append("|---|---|---|---|---|---|")
+            for f in findings:
+                status_cell = f.status
+                if f.superseded_by:
+                    status_cell += f" → {f.superseded_by}"
+                lines.append(
+                    f"| {f.id} | {f.title} | {f.severity} | {f.cwe or '—'} | {f.asset} | {status_cell} |"
+                )
+            lines.append("")
 
         for f in findings:
             status_tag = f" [{f.status}]" if f.status != "open" else ""
@@ -565,6 +757,25 @@ class FindingStore:
                 lines.append("")
 
             lines.append("---")
+            lines.append("")
+
+        # --- Open questions (unknown ledger) --------------------------------
+        # Findings are conclusions; the ledger holds what the investigation
+        # has NOT answered yet.  An appendix (not inline) so the report stays
+        # a findings report — but unresolved threads are never silently
+        # dropped because render_findings is the canonical handoff document.
+        # ``open_unknowns`` was fetched before the findings block above so it
+        # also renders when there are no findings yet.
+        if open_unknowns:
+            lines.append("## Open questions (unresolved)")
+            lines.append("")
+            lines.append("Threads the investigation has not closed:")
+            lines.append("")
+            for u in open_unknowns:
+                asset_bit = f" — {u.asset}" if u.asset else ""
+                lines.append(f"- **{u.id}** ({u.domain}){asset_bit}: {u.question}")
+                if u.context:
+                    lines.append(f"  - context: {u.context}")
             lines.append("")
 
         return "\n".join(lines)

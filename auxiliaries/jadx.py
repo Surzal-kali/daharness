@@ -1289,6 +1289,7 @@ def _run_jadx_digest(result: Dict[str, Any]) -> Dict[str, Any]:
     "the decompile is cached per target and reused until the apk changes.",
     next_hints=["report_finding"],
     result_digest=lambda r: _run_jadx_digest(r),
+    untrusted_target=True,
 )
 def run_jadx(
     target: str,

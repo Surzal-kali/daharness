@@ -47,6 +47,7 @@ from constants import framework_tool
     "Closes the connection when done. For interactive command-decides-next-"
     "command flows, use ssh_connect + ssh_exec instead.",
     next_hints=["report_finding"],
+    untrusted_target=True,
 )
 def ssh_exec_batch(
     hostname: str,

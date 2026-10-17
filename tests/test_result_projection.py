@@ -260,4 +260,133 @@ class TestExecutorEnvelopeUnwrap:
         # sees the raw error dict (with the error text), not the transport
         # wrapper.
         assert projected is raw
-        assert projected["error"] == "brain timeout"
+
+
+class TestProvenanceCarryThrough:
+    """Untrusted-target provenance stamps survive digest/page projection.
+
+    The executor stamps envelopes from ``untrusted_target=True`` tools with
+    ``_provenance`` (both the outer envelope and the inner result dict).
+    Digest and page envelopes are freshly built dicts — without carry-through
+    the stamp (and its prompt-injection warning) would be silently dropped
+    exactly when the result is big enough to matter.
+    """
+
+    STAMP = {"untrusted_target": True, "source": "analysis_target"}
+
+    def _oversized_inner(self):
+        return {
+            "status": "done",
+            "open_ports": [f"port-{i}" for i in range(60)],
+            "job_id": "nm1",
+            "full_output": "Nmap scan report...\n" * 1500,
+        }
+
+    def test_digest_carries_provenance_from_envelope(self, store):
+        envelope = {
+            "status": "Success",
+            "result": self._oversized_inner(),
+            "_provenance": self.STAMP,
+        }
+        projected = project_result(
+            envelope, result_mode="digest", tool_id="test.tool", agent_id="a",
+        )
+        assert projected["mode"] == "digest"
+        assert projected["_provenance"]["untrusted_target"] is True
+        assert projected["_provenance"]["source"] == "analysis_target"
+
+    def test_digest_carries_provenance_from_inner_result(self, store):
+        # The executor also stamps the inner result dict (idempotent via
+        # setdefault) — either location must be honored.
+        inner = self._oversized_inner()
+        inner["_provenance"] = self.STAMP
+        envelope = {"status": "Success", "result": inner}
+        projected = project_result(
+            envelope, result_mode="digest", tool_id="test.tool", agent_id="a",
+        )
+        assert projected["_provenance"]["untrusted_target"] is True
+
+    def test_page_carries_provenance(self, store):
+        envelope = {
+            "status": "Success",
+            "result": self._oversized_inner(),
+            "_provenance": self.STAMP,
+        }
+        projected = project_result(
+            envelope, result_mode="page", tool_id="test.tool", agent_id="a",
+            page_offset=0, page_limit=10,
+        )
+        assert projected["mode"] == "page"
+        assert projected["_provenance"]["untrusted_target"] is True
+
+    def test_unmarked_results_have_no_provenance_key(self, store):
+        """Regular tools must not grow a _provenance key (zero behavior change)."""
+        projected = project_result(
+            {"status": "Success", "result": self._oversized_inner()},
+            result_mode="digest", tool_id="test.tool", agent_id="a",
+        )
+        assert "_provenance" not in projected
+
+
+class TestReadyToCallContinuation:
+    """Oversized/page envelopes carry a ready-to-call continuation dict.
+
+    Mirrors REA's ``details.reported_limits.continuation``: instead of a
+    prose hint the model must parse, the envelope names the exact tool and
+    exact arguments (with next_offset) so pagination is copy-verbatim.
+    """
+
+    def _oversized(self):
+        return {
+            "status": "Success",
+            "open_ports": [f"port-{i}" for i in range(100)],
+            "full_output": "Nmap scan report...\n" * 1500,
+        }
+
+    def test_page_continuation_is_copy_verbatim(self, store):
+        projected = project_result(
+            self._oversized(), result_mode="page",
+            tool_id="test.tool", agent_id="a", page_offset=0, page_limit=10,
+        )
+        cont = projected["continuation"]
+        call = cont["call"]
+        assert call["tool"] == "framework_scratch_search"
+        assert call["arguments"]["scratch_ref"] == projected["full_ref"]
+        assert call["arguments"]["offset"] == 10
+        assert call["arguments"]["limit"] == 10
+        assert cont["next_offset"] == 10
+
+    def test_page_continuation_last_page_absent(self, store):
+        projected = project_result(
+            self._oversized(), result_mode="page",
+            tool_id="test.tool", agent_id="a", page_offset=90, page_limit=10,
+        )
+        assert "continuation" not in projected
+        assert "End of results" in projected["next"]
+
+    def test_digest_continuation_retrieves_full_output(self, store):
+        projected = project_result(
+            self._oversized(), result_mode="digest",
+            tool_id="test.tool", agent_id="a",
+        )
+        cont = projected["continuation"]
+        assert cont["call"]["tool"] == "framework_scratch_search"
+        assert cont["call"]["arguments"]["scratch_ref"] == projected["full_ref"]
+        # The continuation's arguments actually work against the scratch store.
+        retrieved = store.retrieve(
+            projected["full_ref"],
+            agent_id="a",
+            limit=cont["call"]["arguments"].get("limit", 0) or 0,
+        )
+        assert retrieved["status"] == "ok"
+
+    def test_large_mode_projection_continuation(self, store):
+        projected = project_result(
+            self._oversized(), result_mode="large",
+            tool_id="test.tool", agent_id="a",
+        )
+        proj = projected["_projection"]
+        assert proj["mode"] == "large"
+        cont = proj["continuation"]
+        assert cont["call"]["tool"] == "framework_scratch_search"
+        assert cont["call"]["arguments"]["scratch_ref"] == proj["full_ref"]

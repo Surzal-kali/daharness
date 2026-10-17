@@ -375,6 +375,7 @@ register_verdict_parser("masscan", _masscan_fallback_verdict)
     "prevents masscan's default auto-pick from selecting the wrong NIC on "
     "multi-interface hosts.",
     next_hints=["masscan_status", "run_nmap"],
+    untrusted_target=True,
 )
 def run_masscan(
     target: str,
@@ -574,6 +575,7 @@ def run_masscan(
     "Partial results are returned even if the job "
     "was interrupted.",
     next_hints=["masscan_status", "run_nmap", "report_finding"],
+    untrusted_target=True,
 )
 def masscan_status(job_id: str) -> Dict[str, Any]:
     """Poll the progress of a scan launched by ``run_masscan``.

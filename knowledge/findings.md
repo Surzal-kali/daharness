@@ -56,3 +56,34 @@ FTP. A single failure means "not reused here" — do not brute-force. Log
 each validation via `report_finding` so the chain is auditable. The
 `report_finding` tool carries a `next_hints` entry that nudges the
 secretary to do this sweep automatically.
+
+## unknown ledger (open questions)
+
+Where a finding records a *conclusion*, an unknown records an explicit
+"don't know yet" — an unprobed service, a credential recovered but not yet
+validated against other services, an ambiguous result, a scope question.
+Same SQLite store (`ids.db`, `unknowns` table), separate from findings so
+conclusion reports stay clean. Inspired by REA's
+`record_unknown`/`list_unknowns` (morluto/rea).
+
+Tools (all `infra`-tagged, all in the terminal lane — callable past the
+per-turn tool budget):
+
+- `record_unknown(question, domain, asset, context, tool_chain)` — mint an
+  unknown (U-001 style sequential IDs, same lost-id-race handling as findings).
+  Domains: recon|web|creds|enum|postex|scope|general.
+- `list_unknowns(status="open", domain, asset, include_closed)` — compact
+  listing; default shows only open unknowns ("what haven't we answered yet").
+- `resolve_unknown(unknown_id, status, resolution, resolved_by)` — close the
+  loop: `resolved` (answered), `wontfix` (deliberately not pursuing), or
+  `promoted` (question became a finding — pass `resolved_by="F-012"` so
+  reports link the chain).
+
+`render_findings` output carries an **Open questions (unresolved)** appendix
+listing open unknowns — including when zero findings exist yet, so an
+early-days engagement report still shows the open threads. The appendix
+disappears once every unknown is closed.
+
+`report_finding` carries a `next_hints` entry nudging the secretary to sweep
+open ledger questions (e.g. creds pending validation) before continuing
+deeper.

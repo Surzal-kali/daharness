@@ -30,7 +30,7 @@ from utils.memory_tools import remember_text
     "steps, and the list of tools used in this chain. The finding is stored "
     "persistently and a short pointer is saved to memory so it can be "
     "recalled later. Returns a brief confirmation with the finding ID.",
-    next_hints=["test recovered creds against other services once (SSH, web auth, DB, SMB, FTP) — credential-reuse sweep is a standing runbook step", "render_findings"],
+    next_hints=["list_unknowns — sweep open questions from the ledger (e.g. creds recovered but not yet validated against other services) before continuing deeper", "render_findings"],
 )
 def report_finding(
     title: str,
@@ -102,6 +102,176 @@ def report_finding(
             f"Finding {finding.id} reported: {title} ({severity}) on {asset}. "
             f"Use render_findings to review all findings."
         )
+    finally:
+        store.close()
+
+
+
+# ---------------------------------------------------------------------------
+# Unknown ledger — explicit "we don't know yet" records.
+# ---------------------------------------------------------------------------
+
+@framework_tool(
+    "Record an OPEN QUESTION in the unknown ledger — something the "
+    "investigation has noticed but not answered. Use this whenever you spot "
+    "work you cannot finish this turn: an unprobed open port, a credential "
+    "recovered but not yet validated against other services, an ambiguous "
+    "tool result, a scope question about a found host. Unlike a finding, an "
+    "unknown is not a conclusion — it is a durable reminder so the thread is "
+    "never dropped across restarts or agent handoffs. Pass a one-sentence "
+    "question, a domain (recon|web|creds|enum|postex|scope|general), an "
+    "optional asset, and context on what was tried. Returns an unknown ID "
+    "(U-001 style). List with list_unknowns, close with resolve_unknown.",
+    next_hints=["list_unknowns"],
+)
+def record_unknown(
+    question: str,
+    domain: str = "general",
+    asset: str = "",
+    context: str = "",
+    tool_chain: str = "",
+) -> str:
+    """Record an open question in the unknown ledger.
+
+    Args:
+        question: What is not known yet, one sentence, e.g.
+            "Port 3306 open on 10.0.0.5 — unprobed".
+        domain: Investigation area — recon|web|creds|enum|postex|scope|general.
+        asset: Related host/URL/endpoint, if any.
+        context: How this arose / what was already tried.
+        tool_chain: Tools used in this chain, comma-separated (audit trail).
+    """
+    store = FindingStore()
+    try:
+        opened_by = (
+            ",".join(s.strip() for s in tool_chain.split(",") if s.strip())
+            if isinstance(tool_chain, str) else ""
+        )
+        unknown = store.add_unknown(
+            question=question,
+            domain=domain,
+            asset=asset,
+            context=context,
+            opened_by=opened_by,
+        )
+        return (
+            f"Unknown {unknown.id} recorded ({unknown.domain}): "
+            f"{unknown.question}. Use list_unknowns to review open questions; "
+            "resolve_unknown to close one when answered."
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+    finally:
+        store.close()
+
+
+@framework_tool(
+    "List recorded unknowns — the durable open-questions ledger. Returns a "
+    "compact list (ID, domain, status, question, asset). Filter by status "
+    "(open|resolved|wontfix|promoted — default 'open'), by domain "
+    "(recon|web|creds|...), or by asset substring; pass include_closed=true "
+    "to see everything regardless of status. Use this at the start of a turn "
+    "to re-anchor on threads the investigation dropped, and before wrapping "
+    "up to see what remains. Unknowns persist across restarts.",
+    next_hints=["record_unknown", "resolve_unknown", "render_findings"],
+)
+def list_unknowns(
+    status: str = "open",
+    domain: str = "",
+    asset: str = "",
+    include_closed: bool = False,
+) -> str:
+    """List unknowns from the ledger as compact lines.
+
+    Args:
+        status: Filter by lifecycle status (open|resolved|wontfix|promoted).
+            Empty string = no status filter. Ignored when include_closed=true.
+        domain: Filter to one domain (recon|web|creds|enum|postex|scope|general).
+        asset: Filter to unknowns whose asset contains this substring.
+        include_closed: When true, show all statuses (overrides status filter).
+    """
+    store = FindingStore()
+    try:
+        # include_closed=true overrides any status filter (all statuses shown).
+        items = store.unknowns(
+            status=None if include_closed else (status or None),
+            domain=domain or None,
+            asset=asset or None,
+            include_closed=include_closed,
+        )
+        if not items:
+            return (
+                "(no unknowns"
+                + (f" with status={status}" if status and not include_closed else "")
+                + " recorded — the ledger is empty or filters matched nothing)"
+            )
+        lines = [f"{len(items)} unknown(s):", ""]
+        for u in items:
+            lines.append(
+                f"- {u.id} [{u.status}] ({u.domain}) {u.question}"
+                + (f" — asset: {u.asset}" if u.asset else "")
+            )
+            if u.context:
+                lines.append(f"    context: {u.context}")
+            if u.status in ("resolved", "promoted", "wontfix"):
+                lines.append(
+                    f"    resolved: {u.resolution or '-'}"
+                    + (f" (via {u.resolved_by})" if u.resolved_by else "")
+                )
+        lines.append("")
+        lines.append(
+            "Work unknowns down turn-by-turn; resolve_unknown closes each "
+            "one (status=resolved|wontfix|promoted — promoted links the "
+            "finding ID it became)."
+        )
+        return "\n".join(lines)
+    finally:
+        store.close()
+
+
+@framework_tool(
+    "Resolve an unknown — close the loop on a ledger question. Pass the "
+    "unknown ID (e.g. U-003) and a status: 'resolved' (answered, provide "
+    "the answer in resolution), 'wontfix' (deliberately not pursuing), or "
+    "'promoted' (the question became a finding — pass resolved_by= the "
+    "finding ID, e.g. F-012) so render_findings-style reports can link the "
+    "chain. Optionally record who/what resolved it. Returns the updated "
+    "unknown.",
+    next_hints=["list_unknowns"],
+)
+def resolve_unknown(
+    unknown_id: str,
+    status: str,
+    resolution: str = "",
+    resolved_by: str = "",
+) -> str:
+    """Resolve an unknown in the ledger.
+
+    Args:
+        unknown_id: The unknown ID, e.g. "U-003".
+        status: resolved | wontfix | promoted.
+        resolution: The answer or outcome, free text.
+        resolved_by: Finding ID for promoted (e.g. F-012); otherwise the
+            agent/tool chain that closed it.
+    """
+    store = FindingStore()
+    try:
+        updated = store.resolve_unknown(
+            unknown_id=unknown_id,
+            status=status,
+            resolution=resolution or None,
+            resolved_by=resolved_by or None,
+        )
+        if updated is None:
+            return f"Unknown {unknown_id} not found. Use list_unknowns to see all unknowns and their IDs."
+        return (
+            f"Unknown {unknown_id} marked '{updated.status}'."
+            + (f" Resolution: {updated.resolution}." if updated.resolution else "")
+            + (f" Resolved by: {updated.resolved_by}." if updated.resolved_by else "")
+            + " Use list_unknowns to review the remaining open questions."
+        )
+    except ValueError as e:
+        return f"Error: {e}"
     finally:
         store.close()
 
