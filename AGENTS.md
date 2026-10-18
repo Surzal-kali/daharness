@@ -58,6 +58,15 @@ Two passes scan `ALLOWED_TOOL_ROOTS` (`auxiliaries/`, `payloads/`,
    docstring and `argparse` options. Docstrings become the embedding text;
    argparse flags become the JSON-schema-ish `parameters`. These tools run as
    subprocesses via `_execute_local_script()`.
+   A module may opt OUT of this static mint with a module-level
+   `_NO_LOCAL_TOOL = True`. Purpose: modules in an allowed root whose
+   module-level argparse is INTERNAL plumbing (a job subprocess runner,
+   not an operator CLI) would otherwise be minted as a second,
+   gate-bypassing entry point beside their own decorated tools — the
+   flag skips the static mint while the dynamic pass still registers
+   the `@framework_tool` members (`listeners/responder_analog.py` is
+   the reference user). It is a discovery-mint opt-out only; it does
+   not hide anything from Brain imports or execution.
 
 2. **Dynamic import** (`BRAIN_DISPATCH` transport): imports the module and
    walks its members for `@framework_tool`-decorated functions and methods.
@@ -501,6 +510,10 @@ the field is at the top level or nested under `result`.
 2. Add a module-level docstring (this becomes the embedding text).
 3. Use `argparse` with `add_argument` calls — the static scanner extracts
    flags, types, and required-ness into the parameter schema.
+   A module whose argparse is internal plumbing (a background-job
+   subprocess runner, not an operator CLI) sets `_NO_LOCAL_TOOL = True`
+   at module level to skip the static mint — decorated
+   `@framework_tool` members still register.
 4. Re-index: `python -m daharness.core` (or `--clear` to wipe first).
 
 **Option B — `@framework_tool` function/method (BRAIN_DISPATCH):**
