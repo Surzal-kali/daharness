@@ -48,6 +48,55 @@ else
   echo "[code-server-init] WARN: bundled node or product.json not found; skipping gallery injection (non-fatal)"
 fi
 
+# ── TLS: internal CA + signed leaf with host SANs ───────────────────────────
+# code-server's auto-generated self-signed cert only covers DNS:localhost.
+# Webview service workers REFUSE to register on any cert error (no browser
+# click-through), so browsing via a LAN IP (10.0.0.42) fails webviews even
+# with the cert trusted. Design: one internal CA (10-year) signs an 825-day
+# leaf serving the actual host addresses. Devices install the CA ONCE —
+# leaf rotations/volume wipes then never break trust. CA lives in the
+# volume; `docker cp` ca.crt to devices.
+CERT_DIR=/config/.local/share/code-server
+CA_DIR="$CERT_DIR/ca"
+CA_KEY="$CA_DIR/ca.key"
+CA_CRT="$CA_DIR/ca.crt"
+# SANs: explicit via CODE_SERVER_CERT_SANS (compose env, host IPs are
+# per-machine), else best-effort from `hostname -I`, else DNS-only (webview
+# over a raw LAN IP will still fail — set the env).
+SAN_EXTRA="${CODE_SERVER_CERT_SANS:-}"
+if [ -z "$SAN_EXTRA" ] && command -v hostname >/dev/null 2>&1; then
+  SAN_EXTRA="$(hostname -I 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | grep -v '^127\.' | sed 's/^/IP:/' | paste -sd, -)"
+fi
+SAN="DNS:localhost,DNS:kali,IP:127.0.0.1"
+[ -n "$SAN_EXTRA" ] && SAN="${SAN},${SAN_EXTRA}"
+mkdir -p "$CA_DIR"
+if [ ! -s "$CA_KEY" ] || [ ! -s "$CA_CRT" ]; then
+  openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
+    -keyout "$CA_KEY" -out "$CA_CRT" \
+    -subj "/CN=kali-code-server-ca" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1 \
+    && chmod 600 "$CA_KEY" \
+    && chown -R "${PUID:-1000}:${PGID:-1000}" "$CA_DIR" \
+    && echo "[code-server-init] minted internal CA — install ca/certs on devices ONCE, leaf rotations stay trusted"
+fi
+# (Re)issue the served leaf when absent OR not signed by our CA (migrates
+# old self-served leaves transparently on upgrade).
+if [ ! -s "$CERT_DIR/localhost.crt" ] || [ ! -s "$CERT_DIR/localhost.key" ] \
+   || ! openssl verify -CAfile "$CA_CRT" "$CERT_DIR/localhost.crt" >/dev/null 2>&1; then
+  openssl req -newkey rsa:2048 -nodes \
+    -keyout "$CERT_DIR/localhost.key" -out "$CA_DIR/leaf.csr" \
+    -subj "/CN=kali-code-server" >/dev/null 2>&1 \
+    && printf "subjectAltName=%s\nextendedKeyUsage=serverAuth\n" "$SAN" > "$CA_DIR/leaf.ext" \
+    && openssl x509 -req -in "$CA_DIR/leaf.csr" -CA "$CA_CRT" -CAkey "$CA_KEY" \
+       -CAcreateserial -days 825 -extfile "$CA_DIR/leaf.ext" \
+       -out "$CERT_DIR/localhost.crt" >/dev/null 2>&1 \
+    && rm -f "$CA_DIR/leaf.csr" "$CA_DIR/leaf.ext" \
+    && chmod 600 "$CERT_DIR/localhost.key" \
+    && chown "${PUID:-1000}:${PGID:-1000}" "$CERT_DIR/localhost.key" "$CERT_DIR/localhost.crt" \
+    && echo "[code-server-init] leaf reissued under internal CA (SAN: ${SAN})"
+fi
+
 # Give the registry a short grace window so one slow first boot doesn't
 # leave all four installs failed.
 network_ok=0

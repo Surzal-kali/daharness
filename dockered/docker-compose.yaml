@@ -248,6 +248,9 @@ services:
       - PASSWORD=${CODE_SERVER_PASSWORD:?set CODE_SERVER_PASSWORD in dockered/.env}
       - OLLAMA_BASE_URL=http://192.168.56.1:11434 # read by the init script when provisioning Continue
       - DEFAULT_WORKSPACE=/config/workspace # editor boots opened on the framework tree
+      # TLS IP-SANs for the LAN addresses the editor is browsed on — webview
+      # service workers die with a localhost-only cert (see README).
+      - CODE_SERVER_CERT_SANS=IP:10.0.0.42,IP:192.168.56.108
     volumes:
       - code-server-config:/config # extensions, settings, history
       - /home/kali/github/daharness:/config/workspace # live tree; lsio prunes this path from its boot chown → run/brain.sock reachable

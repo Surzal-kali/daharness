@@ -29,7 +29,7 @@ docker compose up -d --build
 | ChromaDB | `9000` | mirrors the old standalone `chroma` container; reuses the existing `chroma-data/` volume |
 | Open WebUI | `3000` | chat front end; calls the framework via the wrappers in [`../owui-tools/`](../owui-tools/) |
 | JupyterLab | `8888` | tool nursery + engagement journals; publishes on all host interfaces (operator choice) |
-| code-server | `8443` | browser editor (LAN-only, HTTPS self-signed); OpenVSX extensions + Continue → host Ollama |
+| code-server | `8443` | browser editor (LAN-only, HTTPS via internal CA); OpenVSX extensions + Continue → host Ollama |
 
 The framework gateway itself serves **5000 on the host lane** via the host's
 `bootstrap.py --daemon` (the `6000` container-lane port predates the
@@ -186,7 +186,18 @@ intact in the editor lane as it is in the tool lanes.
 - **Auth:** `PASSWORD` from `CODE_SERVER_PASSWORD` in `dockered/.env`;
   compose refuses to bring the service up unset, because the editor
   shell has full repo (and bind-mounted framework) access. Serves HTTPS
-  on `8443` with the image's self-signed cert.
+  on `8443`.
+- **TLS:** the init script mints a 10-year internal CA (`ca/ca.crt` in
+  the config volume) and serves an 825-day leaf with the host's real
+  SANs (`CODE_SERVER_CERT_SANS` in compose; defaults include
+  `localhost`, shortname, and the LAN IPs). **Why a CA:** browsers can
+  click through TLS warnings, but webview service workers refuse any
+  cert error — notebook webviews render dead over LAN IPs unless the
+  cert genuinely validates. Install the CA on each device ONCE
+  (`docker cp dockered-code-server-1:/config/.local/share/code-server/ca/ca.crt .`
+  → system/browser trust store); the leaf can then rotate or the volume
+  be wiped without re-trusting anything. Only-if-absent: leaf is
+  reissued automatically if it's absent or not signed by the current CA.
 
 ## Network posture
 
