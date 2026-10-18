@@ -265,7 +265,13 @@ intact in the editor lane as it is in the tool lanes.
   cert genuinely validates. Install the CA on each device ONCE
   (`docker cp dockered-code-server-1:/config/.local/share/code-server/ca/ca.crt .`
   → system/browser trust store); the leaf can then rotate or the volume
-  be wiped without re-trusting anything. Only-if-absent: leaf is
+  be wiped without re-trusting anything. **Gotcha:** browsers re-read
+  trust stores only after a full restart, and when the "Not secure"
+  pill stays red the installed CA copy doesn't match the served one —
+  compare `sha256` fingerprints, re-install, then clear the site's
+  stored data for the address so the failed webview service worker is
+  dropped (its SecurityError kills notebook rendering until then).
+  Only-if-absent: leaf is
   reissued automatically if it's absent or not signed by the current CA.
 
 ## Network posture
