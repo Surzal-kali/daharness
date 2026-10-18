@@ -192,16 +192,23 @@ services:
       - --ServerApp.token=${JUPYTER_TOKEN}
       - --ServerApp.root_dir=/home/jovyan/work
       - --MappingKernelManager.default_kernel_name=daharness
-    # Override the base image's 1s health-check timeout — the stock
-    # docker_healthcheck.py spawns a Python process that imports Jupyter
-    # modules and hits the server API, which takes ~6s on this image
-    # (notebook-intelligence + MCP server + 17 tool registrations all boot
-    # before the API is responsive). 1s guaranteed a permanent "unhealthy"
-    # label that never reflected a real failure.
+    # Custom healthcheck — two reasons we don't use the base image's
+    # docker_healthcheck.py here:
+    #   1. The stock script's ~1s budget can't cover this image (nbi + MCP
+    #      server + tool registrations boot before /api answers).
+    #   2. Since nbi added its "Jupyter MCP Server" sidecar
+    #      (jpserver-mcp-8.json in the runtime dir, url .../mcp), the stock
+    #      script's `next(runtime_dir.glob("*server-*.json"))` picks WHICH
+    #      file is nondeterministic and then blind-appends "api" -> probing
+    #      /mcpapi -> permanent 404 -> a Jupyter that is perfectly healthy
+    #      reported "unhealthy" forever.
+    # Probe the ServerApp port directly; urlopen follows the / -> /login
+    # redirect chain, which serves HTTP 200 unauthenticated, so reachability
+    # alone decides health (token auth is exercised by consumers).
     healthcheck:
-      test: ["CMD", "/etc/jupyter/docker_healthcheck.py"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888/', timeout=10)\""]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       start_period: 60s
       retries: 3
     restart: unless-stopped

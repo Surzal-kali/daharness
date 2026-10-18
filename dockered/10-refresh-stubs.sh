@@ -14,7 +14,7 @@
 # framework tree; at boot the LIVE mount is authoritative, so this hook
 # regenerates over the baked copies (new tools land without waiting for a
 # rebuild). Failure is non-fatal: the baked stubs keep LSP working, just
-# potentially stale — same degradation contract as patch_*.py in this dir.
+# potentially stale — failure is logged and non-fatal.
 #
 # Outputs:
 #   /opt/conda/share/framework-stubs/     ← pyrightconfig stubPath points here

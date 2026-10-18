@@ -105,10 +105,8 @@ terminal REPL:
   [`AGENTS.md`](../AGENTS.md#jupyter-kernel-dabooksipynb) — the deep dive on
   tool-side behavior lives in
   [`../README.md#tool-repl-tool_replpy`](../README.md#tool-repl-tool_replpy).
-- **notebook-intelligence (NBI):** the Dockerfile bakes
-  `jupyter-nbi-config.json` (`/opt/conda/share/jupyter/nbi/config.json`,
-  bind-mounted read-only) and `patch_nbi_providers.py` /
-  `patch_jupyterlab_pypi.py` patch the image's NBI/JupyterLab components.
+- **notebook-intelligence (NBI):** the image bakes `jupyter-nbi-config.json`
+  (`/opt/conda/share/jupyter/nbi/config.json`, bind-mounted read-only).
   `jupyter-nbi/` holds the operator's stored settings + GitHub token
   (contains credentials — gitignored). Notably `chatbook_backend_kernel`
   must be pinned so Chatbook code runs on the `daharness` kernel, not
