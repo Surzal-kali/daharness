@@ -1,8 +1,11 @@
 # Appendices — Framework Tool Schema
 
-Complete reference for every tool in the framework registry. 204 tools
-across four roots. All `BRAIN_DISPATCH` transport unless marked otherwise.
-Parameters listed as `name (type, default)` — `(req)` = required.
+Complete reference for every tool in the framework registry. 208 tools
+across the indexed roots — `auxiliaries`, `payloads`, `listeners`, `utils`
+bear them (`encoders/` + `evasion/` are indexed too but currently mint
+none: resolvers/loaders, not decorated entry points). All `BRAIN_DISPATCH`
+transport unless marked otherwise. Parameters listed as
+`name (type, default)` — `(req)` = required.
 
 ## ids.db — SQLite database
 
@@ -129,7 +132,10 @@ their content as DATA, never instructions):
 `ssh_connect`, `ssh_exec`, `ssh_exec_batch`, `interact_session`, `run_r2`,
 `run_jadx`, `run_nmap`, `nmap_status`, `run_masscan`, `masscan_status`,
 `run_ffuf`, `ffuf_status`, `probe_web`, `extract_js_routes`,
-`zap_history_regex`, `zap_alerts`, `zap_alert_message`.
+`zap_history_regex`, `zap_alerts`, `zap_alert_message`,
+`responders_status`, `responders_captures` (victim-controlled auth
+capabilities: user/domain/workstation strings ride the target's own
+NTLMSSP blob).
 
 ## analysis snapshot cache
 
@@ -394,10 +400,18 @@ curated alias for the deleted `run_web_probe` wrapper).
 
 ## auxiliaries/web_session.py — stateful HTTP lane (cookie jar + CSRF)
 
-Every `session_*` call carries a realistic, sticky per-host User-Agent from
-`evasion/webshape.py` (caller `headers={'User-Agent': ...}` wins;
-`SESSION_UA` env overrides; legacy marker via `SESSION_UA=legacy`). Optional
-per-host pacing floor via `SESSION_HOST_FLOOR`.
+Every `session_*` call carries ONE browser-coherent identity resolved at
+`evasion/webshape.py` — per-host sticky UA ↔ TLS stack ↔ header set ↔
+header order. With `curl_cffi` installed (default
+`SESSION_IMPERSONATION=auto`) the request travels on the impersonating
+client whose template matches the pool pick (full client-hint + sec-fetch
+set, canonical per-family order); otherwise the plain python-requests path
+ships the same UA claim with the family's canonical header order and a
+decodable-only Accept-Encoding fill — the envelope's `fingerprint` field
+names the backend (`curl-impersonate` | `python-requests`) plus the reason
+whenever degraded. Operator-owned identities (`SESSION_UA`, the legacy
+marker, or a caller `User-Agent` header) never impersonate. Optional
+per-host pacing floor via `SESSION_HOST_FLOOR` unchanged.
 
 | tool_id | alias | params | tags |
 |---|---|---|---|
@@ -527,6 +541,27 @@ Kernel bare names: `msf_dispatch`, `msf_index`, `msf_set_payload`,
 | `collab_generate` | none | `infra` |
 | `collab_poll` | `since` (0.0 float), `id` ("") | `infra` |
 | `collab_stop` | `handle` ("") | `infra`; handle `collab` (async) |
+
+## listeners/responder_analog.py — CAPTURE-ONLY LLMNR/NBT-NS poisoner + SMB2 sink
+
+The Phase-4 credential-motion opener: answers LLMNR (UDP 5355) + NBT-NS
+(UDP 137) name queries with our IP (own hostname + `wpad` blacklisted;
+LLMNR answers A queries only) and runs a self-contained SMB2 sink on 445
+that captures the victim's NTLMv2 response as a hashcat -m 5600 /
+john netntlmv2 line, then serves `STATUS_LOGON_FAILURE` — **no relay code
+path**. Captures persist to `run/responder/captures.jsonl` (0600) and land
+in vector memory (namespace `responder`, marked important). The internal
+job main carries the lab gate too, and the module opts out of the static
+LOCAL_FILE mint via `_NO_LOCAL_TOOL = True` — the argparse job plumbing
+never surfaces as a second, gate-bypassing entry beside these decorated
+tools.
+
+| tool_id | params | tags | notes |
+|---|---|---|---|
+| `responders_start` | `iface` (""), `llmnr_port` (5355), `nbns_port` (137), `smb_port` (445) | `net.services` | lab-gated: `SHAPING_LAB_MODE=1` required; TCP 445 capability probe (setcap/sudo remediation); returns `job_id` |
+| `responders_status` | `job_id` (req) | `net.services`; provenance | engine liveness + capture count + most recent captures |
+| `responders_stop` | `job_id` (req) | `net.services` | SIGTERM cleanup |
+| `responders_captures` | `q` (20) | `net.services`; provenance | full hash lines from the capture file |
 
 ## listeners/raw_scan.py — C plugin (ctypes, root required)
 

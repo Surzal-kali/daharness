@@ -21,21 +21,17 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import chromadb
 import httpx
-from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from pydantic import ValidationError
 
 from constants import TransportType, resolve_workspace_root
 
 from ._param_docs import parse_param_docs, annotation_to_schema_type, annotation_to_schema_extras
-from .tool_tags import CANONICAL_TAGS, TOOL_TAGS, resolve_tags, tagged_doc
+from .tool_tags import resolve_tags, tagged_doc
 from .models import ToolManifest
 from .executor import ExecutorMixin
 from .agent import (
-    SecretaryDeps,
     SecretaryMixin,
-    secretary_execute_tool,
-    secretary_search_tools,
     _cli_confirmer,
 )
 
@@ -344,6 +340,23 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
 
         profile["docstring"] = ast.get_docstring(tree) or ""
 
+        # Modules may opt OUT of the static LOCAL_FILE mint with
+        # ``_NO_LOCAL_TOOL = True`` (any assignment targeting that name):
+        # module-level argparse that is INTERNAL plumbing (job subprocess
+        # runners, not a secretary CLI contract) would otherwise be minted
+        # as a second, gate-bypassing entry point beside its own decorated
+        # tools.  Decorated @framework_tool members still mint normally.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                if any(isinstance(t, ast.Name) and t.id == "_NO_LOCAL_TOOL"
+                       for t in node.targets):
+                    profile["_no_local_tool"] = True
+                    break
+            elif isinstance(node, ast.AnnAssign) and isinstance(
+                    node.target, ast.Name) and node.target.id == "_NO_LOCAL_TOOL":
+                profile["_no_local_tool"] = True
+                break
+
         def _add_argument_call(node: ast.Call) -> bool:
             fn = node.func
             return (isinstance(fn, ast.Attribute) and fn.attr == "add_argument") or (
@@ -477,8 +490,11 @@ class ToolRegistry(ExecutorMixin, SecretaryMixin):
                 # add_argument calls means it's a library module (e.g.
                 # utils.session_manager, utils.paramiko_client) whose large
                 # module-level docstring pollutes the vector space with
-                # non-tool noise.
-                if profile["docstring"] and profile["options"]:
+                # non-tool noise.  ``_NO_LOCAL_TOOL = True`` opts out
+                # entirely (see extract_module_profile).
+                if profile.get("_no_local_tool"):
+                    pass  # skip the static mint; PASS 2 still runs
+                elif profile["docstring"] and profile["options"]:
                     # Use the module's top-level docstring as the capability
                     # map the argparse options to parameters
                     params = {"type": "object", "properties": {}}

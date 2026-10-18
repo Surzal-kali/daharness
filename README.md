@@ -100,7 +100,8 @@ lives beside its code:
 - [`listeners/README.md`](listeners/README.md) — the Brain sidecar, OOB
   collaborator, in-process fallback, zombie kill switch
 - [`evasion/README.md`](evasion/README.md) — readiness lane: nmap wire-shaping
-  presets + sticky per-host web fingerprint policy (and their honest limits)
+  presets, the browser-coherent web-session identity (per-host sticky UA ↔
+  curl-impersonate TLS/header stack), + their honest limits
 - [`dockered/README.md`](dockered/README.md) — the containerized workbench
   (ChromaDB + Open WebUI + JupyterLab)
 - [`dabooks/README.md`](dabooks/README.md) — the JupyterLab notebook lane
@@ -205,8 +206,9 @@ becomes the semantic capability description that the registry embeds.
 (offensive lanes: MSF, msfvenom, fuzzing, cracking), [`utils/`](utils/README.md)
 (harness plumbing: scope gate, projection, scratch, findings),
 [`listeners/`](listeners/README.md) (Brain sidecar services, OOB collaborator),
-plus the readiness lanes [`evasion/`](evasion/README.md) (wire-shaping +
-fingerprint policy; `encoders/` loaders are staged but not yet built).
+plus the readiness lanes [`evasion/`](evasion/README.md) (wire-shaping + the
+browser-coherent web-session identity; `encoders/` loaders are staged but not
+yet built).
 Each folder README carries the per-module inventory and that lane's deep dive.
 
 ### Tool Categories (`daharness/tool_tags.py`)
@@ -756,6 +758,8 @@ listeners/
   thebrain.py           Unix socket sidecar + function registry
   listening.py          TCP listener with Brain integration
   collaborator.py       OOB callback listener (HTTP/HTTPS/DNS, Burp Collaborator analog)
+  responder_analog.py   CAPTURE-ONLY LLMNR/NBT-NS poisoner + self-contained SMB2 sink
+                        (NTLMv2 -> hashcat 5600/john line; lab-gated; no relay path)
   raw_scan.py           SYN scanner wrapper (C++ plugin)
   brain_control.py      list/kill Brain-side tool executions (zombie control plane)
   execution_tracker.py  Brain execution tracker state (zombie kill switch)

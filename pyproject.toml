@@ -57,7 +57,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Optional lanes — install only what you use.
-web = ["playwright==1.63.0"]          # rendered-DOM recon sidecar lane (needs: playwright install chromium)
+web = ["playwright==1.63.0", "curl_cffi==0.16.3"]  # rendered-DOM recon sidecar (needs: playwright install chromium) + web-session TLS/header impersonation (curl-impersonate)
 jupyter = ["ipython==9.7.0", "ipykernel==6.29.5", "jupyter_client==7.4.9"]  # notebook kernel lane
 dev = [
     "pytest>=8.0",

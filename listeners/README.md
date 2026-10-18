@@ -110,6 +110,43 @@ root or `CAP_NET_RAW`) wrapped via `ctypes.CDLL` and exposed as
 `@framework_tool` callables — scope-gated like every other traffic-sending
 tool.
 
+## Responder Analog (`responder_analog.py`) — CAPTURE-ONLY LLMNR/NBT-NS + SMB2 sink
+
+The Phase-4 credential-motion opener. Windows falls back to LLMNR
+(UDP 5355, multicast 224.0.0.252) and NBT-NS (UDP 137, broadcast) when DNS
+answers no-such-name, and both legacy protocols have no server
+authentication — this module answers with OUR IP and catches the victim's
+NTLMv2 challenge-response in a self-contained SMB2 sink.
+
+- **Tool triplet + captures**: `responders_start` (background job,
+  `job_id` immediate — the detached subprocess runs the engines + sink),
+  `responders_status` (engine liveness + capture count + recent captures),
+  `responders_stop` (SIGTERM cleanup), and
+  `responders_captures` (full hash lines, hashcat -m 5600 / john
+  netntlmv2 ready). Each capture also persists to
+  `run/responder/captures.jsonl` (0600) and lands in vector memory
+  (namespace `responder`, marked important) so the secretary recalls it.
+- **Gates**: `SHAPING_LAB_MODE=1` required in .env — the SAME lab gate as
+  `evasion/shaping.py`'s decoy/fragment (one switch for deceptive wire
+  traffic). Port 445 is privileged: start probes the bind first and
+  fails closed with the `setcap cap_net_bind_service+ep` remediation
+  (UDP 137/5355 are unprivileged). The scope gate is deliberately NOT
+  consulted — poisoning answers the segment, not a blessed target.
+- **SMB2 sink** (self-contained — no MSF capture dependency): NBSS framing
+  both directions (incl. type-0x81 session requests for 139-style
+  clients), dialect 2.0.2, SPNEGO-wrapped NTLMSSP challenge
+  (`a1 → 30 → a0/Accept-Incomplete → a2/OctetString`) with a realistic
+  TargetInfo AV set (impacket's v2 compute subscribes to
+  `MsvAvDnsHostname`-class pairs; empty TargetInfo kills client parses).
+  Exactly one auth exchange per capture, then `STATUS_LOGON_FAILURE` —
+  **no relay code path exists** in this module.
+- **Own-name blacklist**: our hostname (short + FQDN) and `wpad` are never
+  answered; LLMNR answers A queries only (AAAA ignored, IPv4 sink).
+
+Acceptance chain (todo Phase 4): poison → capture → `run_hashcat` mode
+5600 → credential-reuse sweep → `report_finding`, secretary-driven.
+Parked-by-policy: relays (ntlmrelayx-class).
+
 ## C plugins in this folder
 
 - `plugins/raw_scan.cpp` → `raw_scan.so` — raw SYN scan using `SOCK_RAW`

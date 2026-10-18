@@ -64,15 +64,28 @@
       bugbounty-arsenal.net), UNMJobs/Workday-class form flows (career lane).
 
 ## Phase 4 — Credential motion (lab chain)
-- [ ] Responder analog v1: CAPTURE-ONLY LLMNR/NBT-NS poisoner in listeners/plugins;
-      captured NTLMv2 -> remember_text (poisoning = Network+/CEH territory)
+- [x] **Responder analog v1 LANDED** (`listeners/responder_analog.py`, Oct
+      2026): CAPTURE-ONLY LLMNR (UDP 5355) + NBT-NS (UDP 137) poisoner +
+      self-contained SMB2 sink (dialect 2.0.2, NBSS framing incl. 0x81
+      session requests, SPNEGO-wrapped NTLMSSP challenge with realistic
+      MS-NLMP TargetInfo; exactly one auth per capture, then
+      STATUS_LOGON_FAILURE — no relay code path). Captures →
+      run/responder/captures.jsonl (0600) + `remember_text` ns 'responder'
+      + hashcat -m 5600 / john netntlmv2 lines. Lab-gated via
+      SHAPING_LAB_MODE=1 (same gate as decoy/fragment presets); TCP 445
+      capability probe with setcap remediation; own hostname + wpad
+      blacklisted; LLMNR answers A-only. Integration-proved against a REAL
+      impacket client (loopback): negotiate → challenge → type-3 → captured
+      hash line. MSF-capture-route rejected by operator (msf hardcodes
+      modules in unaware ways) — sink stays in-tree.
 - [ ] GPP cpassword tool: smb_read_file Groups.xml + decrypt cpassword (published
       AES key); hint chain: smb_scanner null session -> gpp_cpassword
 - [ ] samrdump / lookupsid wrappers (SAMR/SID enum) feeding target lists
-- [ ] Next hints: document the pass-the-hash flow in descriptions:
-      secretsdump -hashes :<NTLM> -> psexec_exec
-- [ ] Acceptance: poison -> capture -> secretsdump -hashes -> psexec_exec,
-      fully secretary-driven
+- [x] Next hints: pass-the-hash flow documented in descriptions —
+      secretsdump -hashes :<NTLM> -> psexec_exec (LANDED impacket_suite.py:259)
+- [ ] Acceptance: poison -> capture -> run_hashcat 5600 -> secretsdump
+      -hashes -> psexec_exec, fully secretary-driven (needs live lab VM +
+      re-index of the new responder tools)
 
 ## Parked — do NOT implement until covered in coursework
 - [ ] GetNPUsers (AS-REP roast) — parked Sept 8

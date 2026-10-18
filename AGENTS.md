@@ -436,6 +436,17 @@ overrides the pick (`legacy` restores the old self-identifying
 (`_merge_headers` / `_do_session_request`); caller-supplied
 `headers={'User-Agent': ...}` always win over the pool pick.
 
+Since 2026-10-17 the identity is a single resolved stack, not four knobs:
+`sticky_profile(host)` maps the pick to a pinned curl-impersonate target
+(`curl_cffi`, `web` extra) whose TLS ClientHello + template header set/order
+match the UA claim; coherent platform overrides (UA, `sec-ch-ua-platform`)
+replace template values in-place; the plain python-requests path degrades
+honestly (same UA claim, canonicalised family header order + decodable-only
+Accept fill) and every envelope reports which backend shipped via
+`fingerprint.backend`. `SESSION_IMPERSONATION=off` disables the
+impersonated lane; an operator-owned UA never impersonates. Contract and
+honest limits: `evasion/README.md` (transport-identity stack section).
+
 `payloads/msfvenom_tools.py:generate_payload` gained `encrypt` /
 `encrypt_key` / `encrypt_iv` (aes256/aes256cbc/rc4/xor/base64; key+iv
 hex-validated before any subprocess; exact cipher names come from
