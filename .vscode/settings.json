@@ -17,12 +17,11 @@
 
     // ── Unified Python Language Server Settings ──────────────────────────────
     "python.languageServer": "None",
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
 
     // ── Custom REPL Stub Hook-In (Pylance/Pyright Engine) ────────────────────
-    // Remapped absolute path to your framework-stubs directory
-    "python.analysis.stubPath": "/home/kali/.local/share/framework-stubs",
+    // Keep analysis paths resolvable from the code-server container namespace.
     "python.analysis.extraPaths": [
-        "/home/kali/.local/share/framework-stubs",
         "${workspaceFolder}"
     ],
         // ── Complete Lint/Warning Suppression ────────────────────────────────────

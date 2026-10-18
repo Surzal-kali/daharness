@@ -15,10 +15,14 @@ set -u
 
 EXTS=(
   ms-python.python
+  ms-toolsai.jupyter
   detachhead.basedpyright
   llvm-vs-code-extensions.vscode-clangd
   continue.continue
 )
+# ms-toolsai.jupyter is what actually attaches .ipynb to kernels — with it,
+# the image's baked daharness kernelspec (see dockered/code-server.Dockerfile)
+# shows up in the kernel picker and notebook cells run the framework lane.
 
 # Paths mirror the lsio s6 service invocation (svc-code-server):
 # --user-data-dir /config/data --extensions-dir /config/extensions

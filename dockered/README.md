@@ -1,8 +1,9 @@
 # dockered/ — containerized workbench
 
-A Docker Compose workbench with three services on a `172.28.0.0/24`
+A Docker Compose workbench with four services on a `172.28.0.0/24`
 `workbench` bridge network: **ChromaDB** (vector registry), **Open WebUI**
-(chat front end), and **JupyterLab** (the tool nursery). Everything
+(chat front end), **JupyterLab** (the tool nursery), and **code-server**
+(browser editor with the framework runtime lane). Everything
 bind-mounts the live framework tree — code edits on the host need no
 rebuild.
 
@@ -29,7 +30,7 @@ docker compose up -d --build
 | ChromaDB | `9000` | mirrors the old standalone `chroma` container; reuses the existing `chroma-data/` volume |
 | Open WebUI | `3000` | chat front end; calls the framework via the wrappers in [`../owui-tools/`](../owui-tools/) |
 | JupyterLab | `8888` | tool nursery + engagement journals; publishes on all host interfaces (operator choice) |
-| code-server | `8443` | browser editor (LAN-only, HTTPS via internal CA); OpenVSX extensions + Continue → host Ollama |
+| code-server | `8443` | browser editor (LAN-only, HTTPS via internal CA); baked framework runtime (python venv, stubs, `daharness` kernel); OpenVSX extensions + Continue → host Ollama |
 
 The framework gateway itself serves **5000 on the host lane** via the host's
 `bootstrap.py --daemon` (the `6000` container-lane port predates the
@@ -152,7 +153,9 @@ intact in the editor lane as it is in the tool lanes.
 - **OpenVSX-only extensions**, installed idempotently at boot by
   [`code-server-init/00-extensions-and-continue.sh`](code-server-init/00-extensions-and-continue.sh)
   (mounted into the image's `custom-cont-init.d` hook, non-fatal on
-  failure, retries next boot): `ms-python.python`, `detachhead.basedpyright`,
+  failure, retries next boot): `ms-python.python`, `ms-toolsai.jupyter`
+  (notebook UI — its kernel picker finds the baked `daharness`
+  kernelspec), `detachhead.basedpyright`,
   `llvm-vs-code-extensions.vscode-clangd`, `continue.continue`. Extension
   state lives in the `code-server-config` volume.
 - **Starship prompt**, installed into `/config/.local/bin` and initialized from
@@ -181,6 +184,52 @@ intact in the editor lane as it is in the tool lanes.
   lsio image's default workspace path AND its `DEFAULT_WORKSPACE`, so the
   editor boots opened on the tree; lsio's first-boot ownership pass
   deliberately prunes that path.
+- **Runtime lane (why the service is built, not stock):** the stock lsio
+  image only bind-mounts the tree — no python, no stubs, no kernel. A
+  compose `build` on
+  [`dockered/code-server.Dockerfile`](code-server.Dockerfile) bakes the
+  same runtime lane the jupyter image carries: the pinned framework
+  venv (`/opt/framework-venv`), build-time stubs
+  (`/opt/framework-stubs`), and the `daharness` kernelspec.
+  `python`/`python3`/`pip`/`jupyter` resolve from `/usr/local/bin` (sh
+  wrappers for the interpreters, console-script symlinks for the tools —
+  a bare python symlink cannot work: CPython locates `pyvenv.cfg`
+  relative to the *real* executable, so a symlinked python comes up as
+  system python with no venv site-packages).
+- **Two-layer stubs** (same discipline as the jupyter lane): stubs are
+  generated at build from a COPY'd pruned tree (bind mounts don't exist
+  during `docker build`), then
+  [`code-server-init/10-framework-runtime.sh`](code-server-init/10-framework-runtime.sh)
+  refreshes them from the **live** mount at every boot — new tools need
+  no rebuild — and hands the venv + stubs to `PUID:PGID`
+  (sentinel-guarded, once) so operator pip-installs from the editor
+  terminal work. Regen is non-fatal (baked stubs keep the editor lane
+  working, just potentially stale) and is skipped with a WARN if the
+  mount is incomplete or no user owns `PUID` — the generator's one
+  write into the shared tree (`dabooks/ruff.toml` builtins block) must
+  land with the host's uid, never root's.
+- **Notebook kernel:** the baked `daharness` kernelspec pins
+  `/config/workspace/tool_repl.py --kernel` — `.ipynb` cells pick it in
+  the `ms-toolsai.jupyter` kernel picker and get the `await`-wrapper
+  framework namespace (see the root `AGENTS.md` kernel notes), dispatching
+  through the same `run/brain.sock` lane as jupyter and `tool_repl`.
+- **Editor settings live in the container, not the workspace:** the boot
+  hook provisions the interpreter
+  (`/opt/framework-venv/bin/python`) and the
+  `python.analysis.stubPath` / `basedpyright.analysis.stubPath` values
+  into the persistent `/config/data/User/settings.json` — key-wise
+  only-if-absent, operator edits win and a JSONC (commented) file is
+  left untouched. Deliberately **not** a `pyrightconfig.json` inside the
+  workspace: `/config/workspace` *is* the host tree, and a config file
+  there would leak onto the host's own nvim / host-VS Code pyright
+  lanes. The tracked `.vscode/settings.json` points
+  `python.defaultInterpreterPath` at the host's Python 3.14 venv — dead
+  inside this container (Ubuntu 3.12) — so pick `/opt/framework-venv`
+  once in the interpreter picker; workspaceStorage (the `config` volume)
+  remembers it across reboots.
+- **Boot cost:** the stub refresh runs the full discovery import scan on
+  every start (a couple of minutes before the server answers) — the same
+  accepted latency as the jupyter lane's `10-refresh-stubs.sh`.
 - **Networks:** `workbench` (framework lane, static `.50`) +
   `devnet` — a dedicated plain-NAT bridge attached to nothing else,
   separate from the shared `egress` lane. The editor is a full dev
