@@ -108,6 +108,7 @@ def test_preset_table_defaults():
 def test_generate_builds_correct_argv(tmp_path, monkeypatch):
     """Fake subprocess.run records the argv; the out file is written by the
     fake so the envelope's sha256/size can be verified."""
+    _stub_msfvenom(tmp_path, monkeypatch)
     blob = b"#!/usr/bin/env python3\n# fake stager\n"
     recorded = {}
 
@@ -148,6 +149,7 @@ def test_generate_builds_correct_argv(tmp_path, monkeypatch):
 
 
 def test_generate_surfaces_msfvenom_failure(tmp_path, monkeypatch):
+    _stub_msfvenom(tmp_path, monkeypatch)
     def fake_run(argv, **kwargs):
         return subprocess.CompletedProcess(
             argv, 1, stdout="", stderr="Invalid Payload Selected: nope/xyz\n"
@@ -190,6 +192,7 @@ def _with_stub(monkeypatch, **stub_kwargs):
 
 def test_start_handler_success(tmp_path, monkeypatch):
     monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    _stub_msfvenom(tmp_path, monkeypatch)
     stub = _with_stub(monkeypatch, job_id=7)
     monkeypatch.setattr(
         mv.subprocess, "run",
@@ -208,6 +211,7 @@ def test_start_handler_success(tmp_path, monkeypatch):
 
 def test_start_handler_failure_does_not_fail_generation(tmp_path, monkeypatch):
     monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    _stub_msfvenom(tmp_path, monkeypatch)
     _with_stub(monkeypatch, job_id=None, err="port in use")
     monkeypatch.setattr(
         mv.subprocess, "run",
@@ -225,6 +229,7 @@ def test_start_handler_failure_does_not_fail_generation(tmp_path, monkeypatch):
 
 def test_start_handler_msf_down_reports_and_continues(tmp_path, monkeypatch):
     monkeypatch.setattr(mv, "DROPBOX_DIR", tmp_path)
+    _stub_msfvenom(tmp_path, monkeypatch)
     _with_stub(monkeypatch, running=False)
     monkeypatch.setattr(
         mv.subprocess, "run",

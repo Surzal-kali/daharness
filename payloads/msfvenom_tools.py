@@ -246,14 +246,9 @@ async def generate_payload(
         start_handler: Also start a persistent exploit/multi/handler job via
             the MSF RPC lane to catch the callback (same payload/LHOST/LPORT).
     """
-    bin_path = _locate_msfvenom()
-    if not bin_path:
-        return _fail(
-            "msfvenom binary not found. Install metasploit-framework "
-            "(apt install metasploit-framework) or point MSFVENOM_BIN at it "
-            "in the root-0600 .env."
-        )
-
+    # Argument validation runs BEFORE the binary probe: generation is offline
+    # compute, and on a box without msfvenom the binary-absent error must not
+    # mask bad-argument errors. The probe happens just before argv build.
     preset = (preset or "").strip().lower() or None
     if preset is not None and preset not in PRESETS:
         return _fail(
@@ -318,6 +313,14 @@ async def generate_payload(
         )
     if encoder and not _SAFE_TOKEN.match(encoder):
         return _fail(f"Invalid encoder {encoder!r} — see msfvenom_menu(kind='encoders').")
+
+    bin_path = _locate_msfvenom()
+    if not bin_path:
+        return _fail(
+            "msfvenom binary not found. Install metasploit-framework "
+            "(apt install metasploit-framework) or point MSFVENOM_BIN at it "
+            "in the root-0600 .env."
+        )
 
     argv: List[str] = [bin_path, "-p", payload, f"LHOST={lhost}", f"LPORT={lport}"]
     for key, val in (extra_options or {}).items():

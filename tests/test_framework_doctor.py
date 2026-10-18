@@ -61,6 +61,8 @@ class TestDoctorRemediations:
         """When r2ghidra is absent the reason says so and the remediation is
         the exact string the run_r2 error path uses — doctor and tool agree
         on the fix."""
+        import shutil
+
         from auxiliaries.radare2 import _r2ghidra_available
         rec = framework_doctor(provider="r2")["providers"]["r2"]
         assert rec["provider"] == "r2"
@@ -68,7 +70,10 @@ class TestDoctorRemediations:
             # Either the plugin or the drop dir is missing; both fix strings
             # must be actionable.
             assert rec["remediation"], "unavailable without remediation"
-        if not _r2ghidra_available():
+        if not _r2ghidra_available() and shutil.which("r2"):
+            # Plugin-remediation strings only apply when r2 itself exists —
+            # on a box without r2 the reason is the binary-absent message,
+            # which is a different (also valid) remediation lane.
             assert "install" in rec["reason"].lower() or "missing" in rec["reason"].lower()
             assert "r2pm -ci r2ghidra" in rec["remediation"]
 

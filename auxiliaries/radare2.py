@@ -720,9 +720,9 @@ def run_r2(
         )
 
     # --- target resolution: existing path, or auto-resolve from drop folder ---
-    r2_bin = shutil.which("r2")
-    if r2_bin is None:
-        return _err_envelope(target, command, "radare2 (r2) not found on PATH")
+    # Input validation before environment probing: a bad target must report
+    # the target problem (with the list_r2_targets hint) even on boxes
+    # without r2, instead of being masked by the binary-absent error.
     resolved = resolve_binary_target(target) if target else None
     if resolved is None:
         return _err_envelope(
@@ -731,6 +731,9 @@ def run_r2(
             f"the binary drop folder ({BINARY_TARGETS_ROOT}). Call "
             f"list_r2_targets to see what is available.",
         )
+    r2_bin = shutil.which("r2")
+    if r2_bin is None:
+        return _err_envelope(target, command, "radare2 (r2) not found on PATH")
     # Work against the resolved absolute path from here on.
     target = resolved
 

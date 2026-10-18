@@ -173,10 +173,36 @@ def test_wait_for_timeout_fails_closed():
 
 # --- purity guard (the graduation seam) ---------------------------------
 def test_kernel_lane_package_never_imports_framework():
+    """Kernel-lane purity, probed in a clean subprocess.
+
+    Scanning the running pytest process's sys.modules is order-dependent:
+    any earlier test in the suite that imports framework modules poisons
+    the check (a false positive). The honest probe imports the kernel-lane
+    package in a fresh interpreter and scans THAT process's sys.modules.
+    """
+    import ast
+    import os
+    import subprocess
     import sys
-    offender = [m for m in sys.modules
-                if m.startswith(("constants", "daharness", "utils.session_manager",
-                                 "utils.findings"))]
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    probe = (
+        "import sys\n"
+        "from dabooks.primitives import kernelgate, sweeps\n"
+        "offender = [m for m in sys.modules\n"
+        "            if m.startswith(('constants', 'daharness',\n"
+        "                             'utils.session_manager', 'utils.findings'))]\n"
+        "print(repr(offender))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True, text=True, cwd=str(repo),
+        env={**os.environ, "PYTHONPATH": str(repo)},
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"kernel-lane import probe failed: {proc.stderr}"
+    offender = ast.literal_eval(proc.stdout.strip())
     assert offender == [], f"kernel-lane purity violated by: {offender}"
 
 
