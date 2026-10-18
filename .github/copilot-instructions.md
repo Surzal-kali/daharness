@@ -30,6 +30,10 @@ Execution path: secretary LLM → `search_tools` (vector search, returns manifes
 - **Approval loop**: `execute_tool` is `requires_approval=True`; pydantic-ai pauses with `DeferredToolRequests`, the confirmer approves (full manifest + args), then `run_secretary()` resumes with the same `deps` + `result.all_messages()`. Capped by `SECRETARY_MAX_APPROVAL_ROUNDS`.
 - **Discovery** (`daharness/registry.py:discover_local_tools`), two passes over `ALLOWED_TOOL_ROOTS` (`auxiliaries/`, `payloads/`, `listeners/`, `utils/`, `encoders/`, `evasion/`):
   1. Static `ast` analysis — **never imports**. Module docstring becomes the embedding text; argparse flags become the parameter schema. Runs as subprocess (`LOCAL_FILE`).
+  A module-level `_NO_LOCAL_TOOL = True` opts out of the static mint
+  (internal argparse plumbing must not surface as a second entry point
+  beside its decorated tools); the dynamic pass still registers
+  `@framework_tool` members.
   2. Dynamic import — walks members for `@framework_tool` callables (`BRAIN_DISPATCH`). `MCP_RPC` is reserved for external RPC (Metasploit).
 - **Brain sidecar** (`listeners/thebrain.py`): UDS server on the checkout's gitignored `run/brain.sock` (via `constants.brain_socket_path()`; inside the tree so bind-mounted container lanes share it with the host), 4-byte length-prefixed framing. At startup it scans and **imports** modules in `BRAIN_SCAN_DIRS` (default `auxiliaries,listeners,payloads`) to register `@framework_tool` callables — module-level code runs at Brain boot.
 - **In-process fallback** (`daharness/executor.py`): if the Brain socket is down, `@framework_tool` calls execute in-process with cached class instances. If the Brain **accepted** a call but timed out (`BRAIN_DISPATCH_TIMEOUT`, 600s), the result is a failure and the tool is **not** retried in-process — it may still be running on the Brain.

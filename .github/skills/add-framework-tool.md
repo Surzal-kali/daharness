@@ -16,6 +16,12 @@ Pick the tool type based on what the tool does. High-level logic, networking, co
 
 **Important:** the static scanner uses `ast` — it never imports the module. No side effects at import time needed.
 
+**Opt-out:** if the module's argparse is internal plumbing (e.g. a
+background-job subprocess runner) rather than an operator-facing CLI,
+set `_NO_LOCAL_TOOL = True` at module level — the static scanner skips
+the mint, while decorated `@framework_tool` members still register
+(`listeners/responder_analog.py` is the reference).
+
 ## Option B — @framework_tool function/method (BRAIN_DISPATCH transport)
 
 1. Import `framework_tool` from `constants`.

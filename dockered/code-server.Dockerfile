@@ -18,9 +18,13 @@
 #   provision the container-side editor settings (interpreter + stubPath)
 #   into the persistent /config volume only-if-absent.
 #
-# Marketplace discipline is unchanged (OpenVSX-only — see
-# code-server-init/00-extensions-and-continue.sh; no Microsoft-gallery
-# side-loading, no Copilot VSIX).
+# Marketplace discipline (revised 2026-10-18): extensions come through the
+# Microsoft gallery — OpenVSX ms-python builds strip the bundled
+# python-env-tools "pet" binary, which kills interpreter discovery
+# (`spawn .../python-env-tools/bin/pet ENOENT`). Still NO Copilot VSIX:
+# the assistant stays continue.continue → host-lane Ollama (local-network
+# only). See code-server-init/00-extensions-and-continue.sh for the full
+# rationale and the pre-gallery-swap repair path.
 # =============================================================================
 FROM lscr.io/linuxserver/code-server:latest
 
