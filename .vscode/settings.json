@@ -50,7 +50,12 @@
     "github.copilot.chat.cloudAgent.enabled": false,
     "github.copilot.chat.imageUpload.enabled": false,
     "github.copilot.chat.localIndex.enabled": false,
-    "github.copilot.chat.organizationCustomAgents.enabled": false
+    "github.copilot.chat.organizationCustomAgents.enabled": false,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }
 
 

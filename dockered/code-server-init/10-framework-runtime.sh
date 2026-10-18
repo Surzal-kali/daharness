@@ -92,6 +92,15 @@ keys = {
     "python.venvPath": "/opt",
     "python.analysis.stubPath": os.environ["FRAMEWORK_STUBS_DIR"],
     "basedpyright.analysis.stubPath": os.environ["FRAMEWORK_STUBS_DIR"],
+    # Test discovery lane: ms-python's Testing view (pytest). Interpreter is
+    # already pinned above and MUST stay consistent — discovery shells out to
+    # `<interpreter> -m pytest` (pytest >=7 discovery), and a stale default
+    # pointing at a pytest-less venv kills the whole pane. testpaths +
+    # python_files live in pyproject [tool.pytest.ini_options]; args here stay
+    # minimal so pytest owns discovery, not the editor.
+    "python.testing.pytestEnabled": True,
+    "python.testing.unittestEnabled": False,
+    "python.testing.autoTestDiscoverOnSaveEnabled": True,
 }
 current = {}
 if path.exists():

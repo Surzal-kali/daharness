@@ -79,7 +79,20 @@ Issues = "https://github.com/Surzal-kali/daharness/issues"
 packages = ["daharness", "utils", "auxiliaries", "payloads", "listeners", "encoders"]
 
 [tool.pytest.ini_options]
+# Discovery mirrors the doc'd workflow (pytest tests/): `tests/` only — the
+# argparse-CLI siblings there (repl_recon, tests_ffuf_hydra, …) are NOT pytest
+# modules; keeping python_files explicit makes that survive a stray
+# python_files override. pythonpath pins CWD-independent imports for runners
+# that exec the console-script pytest (which does not insert CWD on sys.path).
+# The cache lives under run/ (gitignored) instead of littering a .pytest_cache
+# at the tree root.
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+cache_dir = "run/pytest-cache"
+# No @pytest.mark usage in this suite today — fail loudly if one appears
+# unregistered (typo'd marks collect silently and then never run).
+addopts = "--strict-markers --strict-config -W error::pytest.PytestUnknownMarkWarning"
 
 [tool.ruff]
 line-length = 100
