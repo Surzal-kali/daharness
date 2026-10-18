@@ -113,6 +113,26 @@ if [ "$network_ok" -ne 1 ]; then
 fi
 
 export HOME=/config
+
+# Install Starship into the persistent config volume so image upgrades do not
+# remove the prompt. The shell hook is written separately so a failed download
+# never prevents the editor from starting.
+STARSHIP_BIN=/config/.local/bin/starship
+mkdir -p /config/.local/bin /config
+if [ ! -x "$STARSHIP_BIN" ]; then
+  if curl -fsSL https://starship.rs/install.sh | sh -s -- --yes --bin-dir /config/.local/bin >/dev/null 2>&1; then
+    echo "[code-server-init] installed Starship prompt"
+  else
+    echo "[code-server-init] WARNING: Starship install failed (non-fatal; retries next boot)"
+  fi
+fi
+if [ -x "$STARSHIP_BIN" ]; then
+  touch /config/.bashrc
+  if ! grep -Fq 'starship init bash' /config/.bashrc; then
+    printf '\n# Starship prompt\nexport PATH="/config/.local/bin:$PATH"\neval "$(starship init bash)"\n' >>/config/.bashrc
+  fi
+fi
+
 for ext in "${EXTS[@]}"; do
   if ! "$CS_BIN" --user-data-dir "$CS_DATA_DIR" --extensions-dir "$CS_EXT_DIR" \
       --disable-telemetry --install-extension "$ext" >/dev/null 2>&1; then
@@ -179,3 +199,4 @@ fi
 # our own writes for the service user (abc == PUID/PGID of this container).
 OWNERSHIP="${PUID:-1000}:${PGID:-1000}"
 chown -R "${OWNERSHIP}" "$CS_DATA_DIR" "$CS_EXT_DIR" /config/.continue /config/.config /config/.local 2>/dev/null || true
+chown "${OWNERSHIP}" /config/.bashrc 2>/dev/null || true

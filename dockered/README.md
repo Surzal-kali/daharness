@@ -155,6 +155,9 @@ intact in the editor lane as it is in the tool lanes.
   failure, retries next boot): `ms-python.python`, `detachhead.basedpyright`,
   `llvm-vs-code-extensions.vscode-clangd`, `continue.continue`. Extension
   state lives in the `code-server-config` volume.
+- **Starship prompt**, installed into `/config/.local/bin` and initialized from
+  the persistent `/config/.bashrc` by the same boot hook. A failed download is
+  non-fatal and retries on the next boot.
 - **Assistant = Continue → host-lane Ollama** (`OLLAMA_BASE_URL`,
   `192.168.56.1:11434` — same host jupyter/open-webui use; both lane
   models are already pulled there). The init script provisions
