@@ -610,6 +610,14 @@ automatically after reporting any credential-bearing finding.
   Missing signatures cause silent type coercion or segfaults.
 - **C plugin paths:** use `Path(__file__).resolve().parent / "plugins" /
   "name.so"` for absolute paths. Relative paths break when the CWD changes.
+- **code-server owns the host docker daemon:** the editor container shares
+  `/var/run/docker.sock` (root-equivalent, deliberate). Compose invoked from
+  the editor must target the host-identical tree mount
+  (`-f /home/kali/github/daharness/dockered/docker-compose.yaml`) — never the
+  `/config/workspace` alias: the HOST daemon resolves `./` bind sources on
+  host paths, so alias paths produce stray dirs / wrong mounts. Socket GID
+  drift after daemon changes = `permission denied` on `/var/run/docker.sock`;
+  re-read `stat -c %g` and sync the compose `group_add`.
 - **Process-local sessions:** `SessionManager` is per-process. If the Brain
   dies and a call falls back in-process, sessions created on the Brain are
   invisible. Design tools to detect and report this, not silently fail.

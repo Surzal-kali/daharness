@@ -19,6 +19,7 @@ pytest tests/test_scope_gate.py::test_ffuf_blocked_raises  # single test
 ```
 
 No lint/format config exists — don't add formatting churn to unrelated changes. Docker lane: `dockered/` (gateway on port **6000**; host lane uses **5000**).
+code-server shares the host docker socket (root-equivalent): compose invoked from the editor targets the host-identical mount `-f /home/kali/github/daharness/...`, never `/config/workspace/...` (host daemon resolves `./` sources on host paths).
 
 ## Architecture
 

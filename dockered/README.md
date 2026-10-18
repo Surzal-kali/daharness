@@ -169,6 +169,20 @@ intact in the editor lane as it is in the tool lanes.
   that rationale lapsed with Copilot resolving at init. **Still no
   Copilot VSIX:** the assistant stays Continue → host-lane Ollama, so
   completions/chat remain local-network only.
+- **Docker lane: host-daemon control from the editor** (added
+  2026-10-18). The container shares `/var/run/docker.sock` (mount with
+  `group_add` set to the HOST socket GID from
+  `stat -c %g /var/run/docker.sock`) and bakes `docker.io` +
+  `docker-compose-v2`, so the editor's terminal manages the real host
+  stack — `docker ps`, build, `docker compose up -d ...`. This is
+  root-equivalent by explicit decision: treat untrusted content in this
+  container (e.g. a malicious marketplace extension) as holding the
+  daemon. Do NOT `chmod 666` the socket — the chmod lands on the HOST.
+  Compose from the editor must use the host-identical second mount of
+  the tree: `-f /home/kali/github/daharness/dockered/docker-compose.yaml`.
+  The `/config/workspace` alias exists only in-container; the host daemon
+  resolves `./` bind sources on HOST paths, so alias paths would create
+  stray dirs and bind the wrong files.
 - **Starship prompt**, installed into `/config/.local/bin` and initialized from
   the persistent `/config/.bashrc` by the same boot hook. A failed download is
   non-fatal and retries on the next boot.

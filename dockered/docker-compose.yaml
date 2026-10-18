@@ -267,12 +267,30 @@ services:
       - PASSWORD=${CODE_SERVER_PASSWORD:?set CODE_SERVER_PASSWORD in dockered/.env}
       - OLLAMA_BASE_URL=http://192.168.56.1:11434 # read by the init script when provisioning Continue
       - DEFAULT_WORKSPACE=/config/workspace # editor boots opened on the framework tree
+      # Docker lane: the CLI (docker.io + docker-compose-v2, baked in
+      # code-server.Dockerfile) talks to the HOST daemon via the shared
+      # socket. DOCKER_HOME pins the CLI config dir to the live tree so
+      # contexts survive lsio's home conventions either way.
+      - DOCKER_HOME=/config/workspace
       # TLS IP-SANs for the LAN addresses the editor is browsed on — webview
       # service workers die with a localhost-only cert (see README).
       - CODE_SERVER_CERT_SANS=IP:10.0.0.42,IP:192.168.56.108
     volumes:
       - code-server-config:/config # extensions, settings, history
       - /home/kali/github/daharness:/config/workspace # live tree; lsio prunes this path from its boot chown → run/brain.sock reachable
+      # Docker lane (with group_add below): second mount of the work tree,
+      # PATH-IDENTICAL to the host — when compose runs INSIDE this container
+      # (-f on the shared tree), ./-relative bind sources must resolve on the
+      # HOST daemon. /config/workspace exists only in-container; pointing
+      # compose at it would make the host daemon mkdir a stray tree and bind
+      # THAT instead of the real files.
+      - /home/kali/github/daharness:/home/kali/github/daharness
+      # Host daemon control plane. Root-equivalent by design (user decision
+      # 2026-10-18): anything in this container fully drives the daemon.
+      # Do NOT chmod 666 the socket — chmod acts on the HOST's socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "999" # HOST socket GID from `stat -c %g /var/run/docker.sock` — re-sync if the daemon group ever changes
       - ./code-server-init/00-extensions-and-continue.sh:/custom-cont-init.d/00-extensions-and-continue.sh:ro
       - ./code-server-init/10-framework-runtime.sh:/custom-cont-init.d/10-framework-runtime.sh:ro
     healthcheck:
