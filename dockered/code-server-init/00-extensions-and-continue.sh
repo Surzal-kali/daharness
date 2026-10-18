@@ -3,10 +3,18 @@
 # linuxserver image's /custom-cont-init.d hook, runs before code-server
 # starts on every boot).
 #
-# Marketplace discipline: OpenVSX only (code-server's default gallery).
-# NO Microsoft-gallery side-loading, NO Copilot VSIX — the marketplace-ToU
-# gray zone stays out of this lane. The assistant is continue.continue
-# pointed at the host-lane Ollama, so completions/chat stay on the LAN.
+# Marketplace discipline (revised 2026-10-18): the gallery injected below is
+# the Microsoft one. Reason: OpenVSX builds of ms-python are stripped of the
+# bundled native interpreter-discovery binary (python-env-tools "pet") —
+# every ms-python vsix on OpenVSX lacks it, so interpreter discovery dies
+# with `spawn .../python-env-tools/bin/pet ENOENT` and Select Python
+# Interpreter can never see /opt/framework-venv. The Microsoft marketplace
+# vsix bundles pet and is what the code-server ecosystem at large runs. The
+# earlier OpenVSX-only stance existed to keep the marketplace-ToU gray zone
+# (the Copilot VSIX footwork) out of this lane; with Copilot resolving at
+# init today that rationale lapsed. Still NO Copilot VSIX: the assistant
+# stays continue.continue → host-lane Ollama, so completions/chat remain
+# local-network only. The editor's trust posture is otherwise unchanged.
 #
 # Failures are non-fatal by design: the editor still boots, and failed
 # installs retry on the next boot.
@@ -15,11 +23,15 @@ set -u
 
 EXTS=(
   ms-python.python
+  ms-python.vscode-python-envs
   ms-toolsai.jupyter
   detachhead.basedpyright
   llvm-vs-code-extensions.vscode-clangd
   continue.continue
 )
+# ms-python.vscode-python-envs is the interpreter-management backend
+# ms-python 2026.x drives for Select Interpreter; explicit so the boot state
+# is deterministic rather than trusting dependency auto-resolution.
 # ms-toolsai.jupyter is what actually attaches .ipynb to kernels — with it,
 # the image's baked daharness kernelspec (see dockered/code-server.Dockerfile)
 # shows up in the kernel picker and notebook cells run the framework lane.
@@ -45,7 +57,7 @@ NODE_BIN=/app/code-server/lib/node
 if [ -n "$NODE_BIN" ] && [ -f "$PRODUCT_JSON" ]; then
   # node -e with the path as a trailing arg — `node -` does NOT mean
   # "read stdin"; node treats it as a filename (ENOENT).
-  if ! "$NODE_BIN" -e 'const fs=require("fs");const path=process.argv[1];const data=JSON.parse(fs.readFileSync(path,"utf8"));if(data.extensionsGallery){console.log("[code-server-init] extensionsGallery already set; skipping")}else{data.extensionsGallery={serviceUrl:"https://open-vsx.org/vscode/gallery",itemUrl:"https://open-vsx.org/vscode/item"};fs.writeFileSync(path,JSON.stringify(data,null,2));console.log("[code-server-init] injected extensionsGallery (open-vsx) into product.json")}' "$PRODUCT_JSON"; then
+  if ! "$NODE_BIN" -e 'const fs=require("fs");const path=process.argv[1];const data=JSON.parse(fs.readFileSync(path,"utf8"));const gallery={serviceUrl:"https://marketplace.visualstudio.com/_apis/public/gallery",itemUrl:"https://marketplace.visualstudio.com/items"};if(data.extensionsGallery&&data.extensionsGallery.serviceUrl===gallery.serviceUrl){console.log("[code-server-init] extensionsGallery already set; skipping")}else{data.extensionsGallery=gallery;fs.writeFileSync(path,JSON.stringify(data,null,2));console.log("[code-server-init] injected extensionsGallery (microsoft marketplace) into product.json")}' "$PRODUCT_JSON"; then
     echo "[code-server-init] WARN: gallery injection into product.json failed (non-fatal; UI marketplace stays offline this boot)"
   fi
 else
@@ -102,17 +114,17 @@ if [ ! -s "$CERT_DIR/localhost.crt" ] || [ ! -s "$CERT_DIR/localhost.key" ] \
 fi
 
 # Give the registry a short grace window so one slow first boot doesn't
-# leave all four installs failed.
+# leave all installs failed.
 network_ok=0
 for _ in $(seq 1 10); do
-  if curl -fsSm 5 https://open-vsx.org/ >/dev/null 2>&1; then
+  if curl -fsSm 5 https://marketplace.visualstudio.com/ >/dev/null 2>&1; then
     network_ok=1
     break
   fi
   sleep 3
 done
 if [ "$network_ok" -ne 1 ]; then
-  echo "[code-server-init] openvsx unreachable at boot - skipping installs, editor will still start"
+  echo "[code-server-init] gallery (marketplace) unreachable at boot - skipping installs, editor will still start"
   exit 0
 fi
 
@@ -143,6 +155,28 @@ for ext in "${EXTS[@]}"; do
     echo "[code-server-init] WARNING: ${ext} install failed (non-fatal; retries next boot)"
   fi
 done
+
+# Repair for pre-gallery-swap boots: the OpenVSX ms-python build is stripped
+# of the bundled python-env-tools binary (the interpreter picker's discovery
+# engine — without it Select Python Interpreter is dead). --force reinstalls
+# from the Microsoft gallery WITHOUT uninstalling first, so a failed fetch
+# leaves the working-but-stripped extension in place until a later boot.
+# sort -V: lexical glob order sorts 2026.10.0 < 2026.4.0 — the highest
+# version must win, and stale uninstall leftovers must lose.
+PET_DIR="$(ls -d "${CS_EXT_DIR}"/ms-python.python-*/ 2>/dev/null | sort -V | tail -1)"
+if [ -n "$PET_DIR" ] && [ ! -x "${PET_DIR}python-env-tools/bin/pet" ]; then
+  echo "[code-server-init] ms-python build lacks python-env-tools (stripped OpenVSX artifact) — forcing marketplace reinstall"
+  for ext in ms-python.python ms-python.vscode-python-envs; do
+    "$CS_BIN" --user-data-dir "$CS_DATA_DIR" --extensions-dir "$CS_EXT_DIR" \
+      --disable-telemetry --install-extension "$ext" --force >/dev/null 2>&1 \
+      || echo "[code-server-init] WARNING: ${ext} marketplace reinstall failed (non-fatal; retries next boot)"
+  done
+  # Re-glob: a --force install may land a newer version dir than PET_DIR.
+  PET_DIR="$(ls -d "${CS_EXT_DIR}"/ms-python.python-*/ 2>/dev/null | sort -V | tail -1)"
+fi
+if [ -n "$PET_DIR" ] && [ -x "${PET_DIR}python-env-tools/bin/pet" ]; then
+  echo "[code-server-init] python-env-tools binary present (interpreter discovery operational)"
+fi
 
 # Continue -> host-lane Ollama. Only written when absent so operator edits
 # (models, endpoints, rules) survive every reboot; tune in the Continue UI

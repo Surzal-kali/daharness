@@ -210,13 +210,13 @@ services:
   # code-server — self-hosted browser editor (LAN-only; no tunnel, no third
   # party in the trust path).
   #
-  # Assistant policy: NO Microsoft-gallery side-loading, NO Copilot VSIX —
-  # the marketplace-ToU gray zone stays out. Pure-local lane instead:
-  # OpenVSX-only extensions (python, jupyter, basedpyright, clangd) installed
-  # idempotently at boot by the mounted init script, and continue.continue
-  # pointed at the host-lane Ollama for inline completions + chat
-  # (config provisioned on first boot only, then operator-owned — never
-  # overwritten by later boots).
+  # Assistant policy: extensions come through the Microsoft gallery (injected
+  # into product.json by the boot hook — OpenVSX's ms-python builds are
+  # stripped of the native python-env-tools binary the interpreter picker
+  # needs; see README). Still NO Copilot VSIX: the assistant stays
+  # continue.continue pointed at the host-lane Ollama for inline completions
+  # + chat (config provisioned on first boot only, then operator-owned —
+  # never overwritten by later boots).
   #
   # The live framework tree is mounted (same discipline as jupyter) so
   # run/brain.sock is reachable from the editor's terminal lane and code

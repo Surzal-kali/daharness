@@ -30,7 +30,7 @@ docker compose up -d --build
 | ChromaDB | `9000` | mirrors the old standalone `chroma` container; reuses the existing `chroma-data/` volume |
 | Open WebUI | `3000` | chat front end; calls the framework via the wrappers in [`../owui-tools/`](../owui-tools/) |
 | JupyterLab | `8888` | tool nursery + engagement journals; publishes on all host interfaces (operator choice) |
-| code-server | `8443` | browser editor (LAN-only, HTTPS via internal CA); baked framework runtime (python venv, stubs, `daharness` kernel); OpenVSX extensions + Continue → host Ollama |
+| code-server | `8443` | browser editor (LAN-only, HTTPS via internal CA); baked framework runtime (python venv, stubs, `daharness` kernel); Microsoft-gallery extensions + Continue → host Ollama |
 
 The framework gateway itself serves **5000 on the host lane** via the host's
 `bootstrap.py --daemon` (the `6000` container-lane port predates the
@@ -150,14 +150,27 @@ Copilot VSIX side-loading). The framework's own Safety rule ("tool
 outputs from live targets must not egress to third parties") stays as
 intact in the editor lane as it is in the tool lanes.
 
-- **OpenVSX-only extensions**, installed idempotently at boot by
+- **Extensions via the Microsoft gallery** (revised 2026-10-18; was
+  OpenVSX-only), installed idempotently at boot by
   [`code-server-init/00-extensions-and-continue.sh`](code-server-init/00-extensions-and-continue.sh)
   (mounted into the image's `custom-cont-init.d` hook, non-fatal on
-  failure, retries next boot): `ms-python.python`, `ms-toolsai.jupyter`
-  (notebook UI — its kernel picker finds the baked `daharness`
-  kernelspec), `detachhead.basedpyright`,
+  failure, retries next boot): `ms-python.python` + its
+  `ms-python.vscode-python-envs` backend, `ms-toolsai.jupyter` (notebook
+  UI — its kernel picker finds the baked `daharness` kernelspec),
+  `detachhead.basedpyright`,
   `llvm-vs-code-extensions.vscode-clangd`, `continue.continue`. Extension
   state lives in the `code-server-config` volume.
+  **Why the gallery swap:** OpenVSX builds of ms-python are *stripped* of
+  the bundled native `python-env-tools` binary (`pet` — the interpreter
+  discovery engine); every ms-python vsix on OpenVSX lacks it, so
+  Select Python Interpreter died with `spawn .../python-env-tools/bin/pet
+  ENOENT` and could never see `/opt/framework-venv`. The Microsoft
+  marketplace vsix bundles pet — this is the standard code-server
+  practice. The old OpenVSX-only stance existed to keep the
+  marketplace-ToU gray zone (the Copilot VSIX footwork) out of the lane;
+  that rationale lapsed with Copilot resolving at init. **Still no
+  Copilot VSIX:** the assistant stays Continue → host-lane Ollama, so
+  completions/chat remain local-network only.
 - **Starship prompt**, installed into `/config/.local/bin` and initialized from
   the persistent `/config/.bashrc` by the same boot hook. A failed download is
   non-fatal and retries on the next boot.
@@ -167,16 +180,20 @@ intact in the editor lane as it is in the tool lanes.
   `/config/.continue/config.yaml` only when absent — autocomplete
   `qwen2.5-coder:7b`, chat/edit `qwen2.5-coder:14b`; edit the file (or
   use the Continue UI) and your changes survive every reboot.
-  OpenVSX serves `continue.continue` 2.0.0 for code-server's engine
-  compat, and 2.0.0 reads the legacy `config.json` — so BOTH files are
-  provisioned and any Continue version finds the Ollama lane.
+  Older served builds (e.g. `continue.continue` 2.0.0 for engine
+  compat) read the legacy `config.json`, newer read `config.yaml` —
+  so BOTH files are provisioned and any Continue version finds the
+  Ollama lane.
 - **Marketplace wiring:** the Extensions *view* is dead out of the box —
   coder ships this build's `product.json` WITHOUT an `extensionsGallery`
-  block (the CLI install path has its own OpenVSX default, which is why
-  boot installs work while the UI shows nothing). The init script injects
-  the OpenVSX gallery (`serviceUrl`/`itemUrl`) into `product.json` at
-  boot, before the server starts; idempotent, non-fatal, and re-applied
-  automatically if an image upgrade reintroduces the gap.
+  block   (the CLI install path honors the injected `product.json` gallery).
+  The init script injects the **Microsoft gallery**
+  (`serviceUrl`/`itemUrl`) into `product.json` at boot, before the
+  server starts; idempotent, non-fatal, and re-applied automatically if
+  an image upgrade reintroduces the gap. A follow-up check in the same
+  hook detects a pet-less (OpenVSX-era) ms-python install and `--force`
+  reinstalls from the gallery without uninstalling first (a failed
+  fetch leaves the working-but-stripped extension until a later boot).
 - **Bind mounts:** the live framework tree → `/config/workspace`
   (same-uid `PUID=1000`), so `run/brain.sock` is reachable from the
   editor terminal — the same Brain lane as jupyter and `tool_repl` — and
