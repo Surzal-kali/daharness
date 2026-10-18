@@ -207,7 +207,16 @@ def _load_cert_input(cert_data: str) -> tuple:
         return cert.public_bytes(Encoding.DER), "pem"
 
     candidate = Path(text)
-    if candidate.is_file():
+    try:
+        candidate_is_file = candidate.is_file()
+    except OSError:
+        # Not a plausible path at all — most notably a long, slash-free
+        # base64 blob: the whole string is one path component over the
+        # 255-byte filename limit, so stat() raises ENAMETOOLONG (Errno 36)
+        # instead of returning False. Falling through to the b64 branch is
+        # the only correct verdict for such input.
+        candidate_is_file = False
+    if candidate_is_file:
         raw = candidate.read_bytes()
         if b"-----BEGIN CERTIFICATE-----" in raw:
             cert = x509.load_pem_x509_certificate(raw)

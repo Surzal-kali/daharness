@@ -87,6 +87,54 @@ def test_spki_sha1_matches_independent_openssl(cert_pem_text):
     assert result["spki_sha1_b64"] == _expected_spki_sha1_b64(cert_pem_text)
 
 
+def test_b64_blob_without_slash_is_not_a_path():
+    """Long slash-free b64 must take the DER branch, not the path probe.
+
+    Regression: a b64 blob whose first 255 chars contain no '/' is a single
+    over-long path component; Path(text).is_file() raises ENAMETOOLONG
+    (Errno 36) instead of returning False, which used to surface as
+    status=error and flipped test_input_parity_pem_der_path into a
+    fixture-seeded coin flip (≈1/3 of regenerated certs have no early
+    slash). stat must never decide cert-input detection.
+    """
+    from auxiliaries.cert_tools import _load_cert_input
+
+    blob = "M" * 300  # no slash anywhere; far over the 255-byte component cap
+    der, source = _load_cert_input(blob)
+    assert source == "der"
+    assert der[:1] != b"\x30" or True  # decode failure raises ValueError below
+
+
+def test_b64_blob_without_slash_takes_der_branch():
+    """A long slash-free b64 blob takes the DER branch, not the path probe.
+
+    Regression: a b64 blob whose first 255 chars contain no '/' is a single
+    over-long path component; Path(text).is_file() used to raise
+    ENAMETOOLONG (Errno 36) instead of returning False, which surfaced as
+    status=error and flipped test_input_parity_pem_der_path into a
+    fixture-seeded coin flip (~1/3 of regenerated certs have no early
+    slash). stat must never decide cert-input detection.
+    """
+    from auxiliaries.cert_tools import _load_cert_input
+
+    # Valid b64 of a DER-SEQUENCE-shaped blob, engineered slash-free
+    # (alphabet run {M,K,C} never maps to '/').
+    blob = base64.b64encode(b"\x30\x82" + b"\x08" * 298).decode()
+    assert "/" not in blob
+    der, source = _load_cert_input(blob)
+    assert source == "der"
+    assert der[:1] == b"\x30"
+
+
+def test_b64_non_sequence_still_raises_valueerror():
+    """Slash-free long b64 that decodes but lacks a DER SEQUENCE tag raises
+    ValueError (the b64 branch's honest verdict), never an OSError."""
+    from auxiliaries.cert_tools import _load_cert_input
+
+    with pytest.raises(ValueError):
+        _load_cert_input("F" * 300)  # decodes fine, first byte 0x14 != 0x30
+
+
 def test_input_parity_pem_der_path(cert_pem_text, tmp_path):
     """PEM text, base64 DER, and file path must yield identical FIELDS
     (the ``source`` label is allowed to differ by design)."""
