@@ -16,7 +16,7 @@
     },
 
     // ── Unified Python Language Server Settings ──────────────────────────────
-    "python.languageServer": "Pylance",
+    "python.languageServer": "None",
 
     // ── Custom REPL Stub Hook-In (Pylance/Pyright Engine) ────────────────────
     // Remapped absolute path to your framework-stubs directory

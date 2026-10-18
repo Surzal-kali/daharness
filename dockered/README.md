@@ -29,6 +29,7 @@ docker compose up -d --build
 | ChromaDB | `9000` | mirrors the old standalone `chroma` container; reuses the existing `chroma-data/` volume |
 | Open WebUI | `3000` | chat front end; calls the framework via the wrappers in [`../owui-tools/`](../owui-tools/) |
 | JupyterLab | `8888` | tool nursery + engagement journals; publishes on all host interfaces (operator choice) |
+| code-server | `8443` | browser editor (LAN-only, HTTPS self-signed); OpenVSX extensions + Continue → host Ollama |
 
 The framework gateway itself serves **5000 on the host lane** via the host's
 `bootstrap.py --daemon` (the `6000` container-lane port predates the
@@ -36,7 +37,8 @@ open-terminal removal).
 
 Keys/tokens come from `dockered/.env` (not tracked): `JUPYTER_TOKEN`,
 `OPEN_TERMINAL_API_KEY` (now used by Open WebUI → Jupyter integration),
-`WEBUI_URL_PREFIX`, `WEBUI_SECRET_KEY`, and — if you expose the gateway to
+`WEBUI_URL_PREFIX`, `WEBUI_SECRET_KEY`, `CODE_SERVER_PASSWORD`
+(code-server editor auth), and — if you expose the gateway to
 the wider LAN — `GATEWAY_API_KEY` (host-side `.env`).
 
 ## ChromaDB
@@ -137,6 +139,54 @@ terminal REPL:
 > whose DNS name no longer resolves. The kernel lane dispatches through the
 > shared Brain socket rather than the gateway, so notebooks work; update
 > this env (or drop it) if you wire notebook-side REST calls to the gateway.
+
+## code-server — browser editor (LAN-only, pure-local assistant)
+
+Self-hosted browser VS Code (`lscr.io/linuxserver/code-server`) for the
+notebook/RE lane — the tunnel-free alternative: **no Microsoft dev-tunnel
+relay in the trust path** and **no marketplace-ToU gray zone** (no
+Copilot VSIX side-loading). The framework's own Safety rule ("tool
+outputs from live targets must not egress to third parties") stays as
+intact in the editor lane as it is in the tool lanes.
+
+- **OpenVSX-only extensions**, installed idempotently at boot by
+  [`code-server-init/00-extensions-and-continue.sh`](code-server-init/00-extensions-and-continue.sh)
+  (mounted into the image's `custom-cont-init.d` hook, non-fatal on
+  failure, retries next boot): `ms-python.python`, `detachhead.basedpyright`,
+  `llvm-vs-code-extensions.vscode-clangd`, `continue.continue`. Extension
+  state lives in the `code-server-config` volume.
+- **Assistant = Continue → host-lane Ollama** (`OLLAMA_BASE_URL`,
+  `192.168.56.1:11434` — same host jupyter/open-webui use; both lane
+  models are already pulled there). The init script provisions
+  `/config/.continue/config.yaml` only when absent — autocomplete
+  `qwen2.5-coder:7b`, chat/edit `qwen2.5-coder:14b`; edit the file (or
+  use the Continue UI) and your changes survive every reboot.
+  OpenVSX serves `continue.continue` 2.0.0 for code-server's engine
+  compat, and 2.0.0 reads the legacy `config.json` — so BOTH files are
+  provisioned and any Continue version finds the Ollama lane.
+- **Marketplace wiring:** the Extensions *view* is dead out of the box —
+  coder ships this build's `product.json` WITHOUT an `extensionsGallery`
+  block (the CLI install path has its own OpenVSX default, which is why
+  boot installs work while the UI shows nothing). The init script injects
+  the OpenVSX gallery (`serviceUrl`/`itemUrl`) into `product.json` at
+  boot, before the server starts; idempotent, non-fatal, and re-applied
+  automatically if an image upgrade reintroduces the gap.
+- **Bind mounts:** the live framework tree → `/config/workspace`
+  (same-uid `PUID=1000`), so `run/brain.sock` is reachable from the
+  editor terminal — the same Brain lane as jupyter and `tool_repl` — and
+  code edits on the host need no rebuild. `/config/workspace` is the
+  lsio image's default workspace path AND its `DEFAULT_WORKSPACE`, so the
+  editor boots opened on the tree; lsio's first-boot ownership pass
+  deliberately prunes that path.
+- **Networks:** `workbench` (framework lane, static `.50`) +
+  `devnet` — a dedicated plain-NAT bridge attached to nothing else,
+  separate from the shared `egress` lane. The editor is a full dev
+  workbench (marketplace, git, language servers) and gets its own
+  outbound lane; it wins the default route, lab DNS stays at `172.28.0.1`.
+- **Auth:** `PASSWORD` from `CODE_SERVER_PASSWORD` in `dockered/.env`;
+  compose refuses to bring the service up unset, because the editor
+  shell has full repo (and bind-mounted framework) access. Serves HTTPS
+  on `8443` with the image's self-signed cert.
 
 ## Network posture
 

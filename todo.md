@@ -89,9 +89,20 @@
 
 ## Parked — do NOT implement until covered in coursework
 - [ ] GetNPUsers (AS-REP roast) — parked Sept 8
-- [ ] GetUserSPNs (Kerberoast) — parked Sept 8
-- [ ] ntlmrelayx (relay) — may be ahead of coverage; revisit with coursework
-- [ ] dpapi (blob decryption) — post-exploit crypto, likely ahead
+- [ ] ntlmrelayx (relay) — parked Sept 8; coursework will NOT cover it
+      (operator ruling Oct 2026): mechanics refresher delivered (chat,
+      Oct 2026) — proxy-the-auth-model, one-leg targeting matrix
+      (SMB/HTTP in → LDAP/LDAPS/MSSQL/ADCS out), 24H2 required-signing
+      reality, coercion lane, per-target allowlist invariant. Build only
+      with a live lab + explicit operator blessing.
+- [ ] dpapi (blob decryption) — parked, BUT coursework coverage unlikely
+      (operator ruling Oct 2026): mechanics refresher delivered. Shape when
+      built: thin `impacket.dpapi` library wrapper (library CONFIRMED in
+      venv; examples script absent) — decode/masterkey-password/
+      masterkey-backup/credential tools; all OFFLINE (routes: user
+      password+SID / DPAPI_SYSTEM via secretsdump / DC domain backup key);
+      chains with secretsdump + smb_read_file; no gates needed. Chrome 127+
+      app-bound cookies = honest wall.
 
 ## Backlog / big rocks
 - [ ] radare2 composite wrapper: r2 subprocess, command allowlist
