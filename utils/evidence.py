@@ -436,6 +436,7 @@ from constants import framework_tool  # noqa: E402
     "conclusion — it is a durable, typed reminder with its own attempt "
     "ledger. Credential material stays hot for the 24h engagement floor by "
     "default; scope questions never expire.",
+    tags=["infra"],
     next_hints=[
         "add_validation_attempt — credential-reuse sweep: ONE attempt per service",
         "list_open_evidence — review open items + attempt coverage",
@@ -507,6 +508,7 @@ def record_evidence(
     "validation; re-mint a fresh evidence entry to legitimately re-test. "
     "Reuse hits (outcome=hit) are P2/P3 findings in their own right: report "
     "them via report_finding and resolve the entry as promoted.",
+    tags=["infra", "net.services"],
     next_hints=[
         "list_open_evidence — which credentials still owe services an attempt",
         "report_finding — credential-reuse hits are findings (P2/P3)",
@@ -554,6 +556,7 @@ def add_validation_attempt(
     "shows which (service, target) pairs were already attempted exactly "
     "once; a credential with zero attempts is the highest-priority next "
     "action. Optionally filter by kind.",
+    tags=["infra"],
     next_hints=["add_validation_attempt", "resolve_evidence"],
 )
 def list_open_evidence(kind: str = "", engagement: str = "") -> str:
@@ -593,6 +596,7 @@ def list_open_evidence(kind: str = "", engagement: str = "") -> str:
     "carry the finding ID, mirroring the unknown-ledger contract). Resolved "
     "entries keep their skeleton and attempt ledger for reconciliation; "
     "only the operator purges engagement material.",
+    tags=["infra"],
     next_hints=["list_open_evidence", "render_findings"],
 )
 def resolve_evidence(
