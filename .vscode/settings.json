@@ -16,7 +16,7 @@
     },
 
     // ── Unified Python Language Server Settings ──────────────────────────────
-    "python.languageServer": "None",
+    "python.languageServer": "Default",
     "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
 
     // ── Custom REPL Stub Hook-In (Pylance/Pyright Engine) ────────────────────
