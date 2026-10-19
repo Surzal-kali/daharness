@@ -67,13 +67,15 @@ RUN printf '#!/bin/sh\nexec /opt/framework-venv/bin/python "$@"\n' >/usr/local/b
 # ── Build-time stub generation ────────────────────────────────────────────────
 # Framework copy for stub generation (bind mounts don't exist in the build
 # container). Same pruned set as jupyter.Dockerfile — keep the three files in
-# sync (jupyter.Dockerfile, this file, scripts/gen_repl_stubs.py imports).
+# sync (jupyter.Dockerfile, this file, scripts/gen_repl_stubs.py imports tool_repl
+# the shim, which imports replkit).
 COPY daharness/ /tmp/framework-build/daharness/
 COPY utils/ /tmp/framework-build/utils/
 COPY auxiliaries/ /tmp/framework-build/auxiliaries/
 COPY payloads/ /tmp/framework-build/payloads/
 COPY listeners/ /tmp/framework-build/listeners/
 COPY encoders/ /tmp/framework-build/encoders/
+COPY replkit/ /tmp/framework-build/replkit/
 COPY constants.py tool_repl.py scripts/gen_repl_stubs.py /tmp/framework-build/tmp-copy/
 RUN mv /tmp/framework-build/tmp-copy/gen_repl_stubs.py /tmp/framework-build/gen_repl_stubs.py \
     && mkdir -p /tmp/framework-build/scripts \

@@ -29,6 +29,15 @@ if "dotenv" not in sys.modules:
     sys.modules["dotenv"] = _dotenv_stub
 
 import tool_repl as tr
+import replkit.brain_lane as bl
+
+def test_shim_reexports_brain_lane():
+    """The shim's socket/brain symbols must BE the actual
+    replkit.brain_lane objects, not a copy — tests monkeypatch bl.BRAIN_SOCKET
+    to point at a fake-brain sock, and callers reach the real module through
+    the shim."""
+    assert tr.BRAIN_SOCKET is bl.BRAIN_SOCKET
+    assert tr._brain_call is bl._brain_call
 
 
 class TestBrainFraming:
@@ -62,7 +71,7 @@ class TestBrainCall:
             await writer.drain()
             writer.close()
 
-        monkeypatch.setattr(tr, "BRAIN_SOCKET", sock_path)
+        monkeypatch.setattr(bl, "BRAIN_SOCKET", sock_path)
 
         async def main():
             server = await asyncio.start_unix_server(fake_brain, path=sock_path)
@@ -84,7 +93,7 @@ class TestBrainCall:
         """No in-process fallback on Brain-down: the refusal is the feature
         (a fallback would strand the session REPL-local, invisible to the
         agent — the split-brain this helper exists to prevent)."""
-        monkeypatch.setattr(tr, "BRAIN_SOCKET", str(tmp_path / "absent.sock"))
+        monkeypatch.setattr(bl, "BRAIN_SOCKET", str(tmp_path / "absent.sock"))
         res = asyncio.run(
             tr._brain_call(
                 "utils.paramiko_client.ssh_connect",
@@ -112,7 +121,7 @@ class TestBrainCall:
             await writer.drain()
             writer.close()
 
-        monkeypatch.setattr(tr, "BRAIN_SOCKET", sock_path)
+        monkeypatch.setattr(bl, "BRAIN_SOCKET", sock_path)
 
         async def main():
             server = await asyncio.start_unix_server(fake_brain, path=sock_path)
