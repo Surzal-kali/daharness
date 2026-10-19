@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -129,12 +130,60 @@ _DB: Dict[str, Any] = {
     "warned": False,       # one-time absence warning
 }
 
+_INFERRED_LANE: Optional[str] = None
+
+
+def _infer_lane_from_entrypoint() -> str:
+    """Intrinsic lane identity from the entry point — NOT operator-configured.
+
+    Attribution is only trustworthy when the lane can't easily mislabel
+    itself, so the default comes from the process's own argv (tool_repl.py →
+    repl lane, api_gateway.py → gateway lane, bootstrap/thebrain → brain
+    lane). A shared `.env` pins ONE value onto every process that sources
+    it, which mislabels whole lanes and (since the pinned role's password
+    must match too) breaks auth for all of them at once;
+    ``HARNESS_DB_LANE`` stays as an explicit override for tests/pinning.
+    """
+    global _INFERRED_LANE
+    if _INFERRED_LANE is not None:
+        return _INFERRED_LANE
+    argv0 = (sys.argv[0] if sys.argv and sys.argv[0] else "").lower()
+    base = os.path.basename(argv0).replace(".py", "")
+    if base == "tool_repl":
+        inferred = "repl_lane"
+    elif "gateway" in base or base == "bootstrap":
+        inferred = "gateway_lane"  # bootstrap.daemon hosts the chat/secretary lane
+    elif base == "thebrain":
+        inferred = "brain_lane"
+    else:
+        inferred = "repl_lane"  # kernels, ad-hoc probes — interactive lanes
+    _INFERRED_LANE = inferred
+    return inferred
+
 
 def _lane_role() -> str:
-    """Which lane credential this process authenticates with. Set
-    HARNESS_DB_LANE at boot (bootstrap daemon: gateway_lane, Brain:
-    brain_lane); defaults to repl_lane for interactive lanes."""
-    return os.getenv("HARNESS_DB_LANE", "repl_lane").strip() or "repl_lane"
+    """Which lane credential this process authenticates with. Inferred from
+    the entry point (see ``_infer_lane_from_entrypoint``); explicit
+    ``HARNESS_DB_LANE`` wins for tests/pinning."""
+    explicit = os.getenv("HARNESS_DB_LANE", "").strip()
+    if explicit:
+        return explicit
+    return _infer_lane_from_entrypoint()
+
+
+def _host_candidates() -> List[str]:
+    """Postgres endpoints to try, ordered. Explicit ``HARNESS_DB_HOST`` wins
+    (single candidate). Default order is lane-safe in this stack's topology:
+    the compose service name 'postgres' (container lanes on the workbench
+    network resolve it; host-lane processes fail the lookup instantly) then
+    the host-published loopback ('127.0.0.1', the host lane's reach). The
+    workbench bridge IP '172.28.0.20' is a pinned-subnet fallback for lanes
+    that never see DNS.
+    """
+    explicit = os.getenv("HARNESS_DB_HOST", "").strip()
+    if explicit:
+        return [explicit]
+    return ["postgres", "127.0.0.1", "172.28.0.20"]
 
 
 def lane_name() -> str:
@@ -185,20 +234,27 @@ def connect(*, role: Optional[str] = None, force: bool = False):
 
     user = role
     password = _password_for(role)
-    host = os.getenv("HARNESS_DB_HOST", "127.0.0.1")
     port = os.getenv("HARNESS_DB_PORT", "5432")
     dbname = os.getenv("HARNESS_DB_NAME", "harness")
-    try:
-        conn = psycopg.connect(
-            host=host, port=port, dbname=dbname, user=user, password=password,
-            connect_timeout=2, application_name=f"daharness_{role}",
-        )
-    except Exception as exc:
+    conn = None
+    last_exc: Exception | None = None
+    for host in _host_candidates():
+        try:
+            conn = psycopg.connect(
+                host=host, port=port, dbname=dbname, user=user, password=password,
+                connect_timeout=2, application_name=f"daharness_{role}",
+            )
+            _DB["host"] = host
+            break
+        except Exception as exc:
+            last_exc = exc
+            conn = None
+    if conn is None:
         if not _DB["warned"]:
             _DB["warned"] = True
             logger.info(
                 "[engagement] Postgres unavailable (%s) — journal/evidence DB "
-                "lane stays optional; will retry every %.0fs", exc,
+                "lane stays optional; will retry every %.0fs", last_exc,
                 _RECONNECT_BACKOFF_S,
             )
         _DB["down_until"] = now + _RECONNECT_BACKOFF_S

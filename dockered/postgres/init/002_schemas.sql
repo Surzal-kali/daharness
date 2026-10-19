@@ -102,9 +102,6 @@ CREATE TRIGGER evidence_default_ttl
     BEFORE INSERT ON evidence.entries
     FOR EACH ROW EXECUTE FUNCTION evidence.default_ttl();
 
-CREATE INDEX IF NOT EXISTS idx_evidence_engagement_kind
-    ON evidence.entries (engagement, status, kind);
-
 -- The credential-reuse sweep: each validation attempt is an auditable event.
 -- The UNIQUE (entry_id, service, target) enforces the standing runbook rule —
 -- "exactly one attempt per service" — at the DB, where the secretary's
@@ -132,7 +129,22 @@ GRANT SELECT, INSERT ON journal.entries, evidence.entries, evidence.attempts
 GRANT SELECT, INSERT, UPDATE ON evidence.entries TO brain_lane, gateway_lane, repl_lane;
 GRANT SELECT, INSERT ON engagement.engagements TO brain_lane, gateway_lane, repl_lane;
 GRANT UPDATE ON evidence.attempts TO repl_lane;   -- operator-only correction
-GRANT USAGE ON SEQUENCES journal.entries_entry_id_seq, evidence.entries_entry_id_seq,
-    evidence.attempts_attempt_id_seq TO brain_lane, gateway_lane, repl_lane;
+-- Table grants do NOT confer schema entry: lanes + operator need USAGE on
+-- every schema they touch (owner-only otherwise → 'permission denied for
+-- schema journal' on the first lane write).
+GRANT USAGE ON SCHEMA engagement, journal, evidence
+    TO brain_lane, gateway_lane, repl_lane, harness_operator;
+GRANT USAGE ON SEQUENCE
+    journal.entries_entry_id_seq,
+    evidence.entries_entry_id_seq,
+    evidence.attempts_attempt_id_seq
+    TO brain_lane, gateway_lane, repl_lane;
+
+-- Operator read visibility (the human's psql session + the editor's
+-- PostgreSQL extension connect as this role): read-only browse of every
+-- store. Holds no writes here; erase power comes from engagement.purge()
+-- (SECURITY DEFINER, 003_functions.sql).
+GRANT SELECT ON journal.entries, evidence.entries, evidence.attempts,
+    engagement.engagements TO harness_operator;
 
 COMMIT;

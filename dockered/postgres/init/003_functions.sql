@@ -26,10 +26,7 @@ BEGIN
         FROM engagement.engagements WHERE slug = p_slug;
 
     IF v_closed IS NULL THEN
-        RAISE EXCEPTION '%'
-            USING MESSAGE = format(
-                'engagement %s is not closed — close it before purge (export findings first)',
-                p_slug);
+        RAISE EXCEPTION 'engagement % is not closed — close it before purge (export findings first)', p_slug;
     END IF;
 
     DELETE FROM evidence.attempts

@@ -249,6 +249,11 @@ def test_evidence_tools_are_framework_tools(ws_root, no_postgres):
                resolve_evidence):
         assert getattr(fn, "_is_framework_tool", False)
 
+    # The store requires an armed engagement at record time (operator
+    # hardening, 2026-10-19) — arm one through the armed-state lane.
+    from utils import engagement as eng
+    eng.arm("test.lab")
+
     out = record_evidence(
         kind="credential",
         summary="cred B",
