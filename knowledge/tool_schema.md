@@ -91,6 +91,26 @@ WAL mode: `PRAGMA journal_mode=WAL` — readers don't block the writer across
 processes. A root guard chowns `ids.db` + WAL + SHM back to the workspace
 owner when a prior root run left them root-owned.
 
+### Postgres schemas (engagement cobweb lane)
+
+One Postgres DB (`harness`), schema-per-store — the append-only spine
+behind `ids.db`-lane stores' engagement awareness (2026-10-19 design; full
+map in `engagement_lane.md`, init scripts in
+`dockered/postgres/init/`):
+
+| Schema · table | Holds | Lane rights |
+|---|---|---|
+| `engagement.engagements` | cobweb registry: slug, RoE note, started/closed | INSERT/SELECT |
+| `journal.entries` | one row per tool dispatch (all lanes): args JSONB, digest, engagement, lane | INSERT/SELECT (append-only) |
+| `evidence.entries` | typed open items: credential/service/ambiguity/scope_question/observation + TTL | INSERT/SELECT + column-level UPDATE (status/resolved_by flips only) |
+| `evidence.attempts` | reuse-sweep ledger: UNIQUE(entry, service, target) enforces one attempt per service | INSERT/SELECT |
+
+No lane holds DELETE anywhere — the retention sweep and engagement purge
+run as owner-executed SECURITY DEFINER functions; purge executes only for
+`harness_operator`. Lanes reach the server by per-entry-point inferred
+roles; Postgres absent → journaling skips, evidence falls back to its
+SQLite mirror (`evidence/evidence.db`).
+
 ## transport types
 
 | Transport       | How it executes                                              |
@@ -638,6 +658,39 @@ findings).
 | `remember_text` | `remember_text` | `text` (req), `namespace` ("engagement"), `memory_id` (""), `agent_id` (""), `important` (False) | `infra` |
 | `recall_text` | auto | `query` (req), `namespace` ("engagement"), `limit` (5), `agent_id` (""), `target` (""), `since_hours` (0) | `infra` |
 | `list_text_namespaces` | auto | none | `infra` |
+
+## utils/evidence.py — evidence ledger (promoted unknown ledger)
+
+| tool_id | alias | params | tags |
+|---|---|---|---|
+| `record_evidence` | auto | `kind` (req: credential\|service\|ambiguity\|scope_question\|observation), `summary` (req), `asset` (""), `content_json` (""), `source` (""), `scratch_ref` (""), `ttl_hours` (-1 = per-kind default) | `infra` |
+| `add_validation_attempt` | auto | `evidence_id`, `service`, `target`, `outcome` (req: hit\|miss\|error\|undecided), `note` ("") | `infra` |
+| `list_open_evidence` | auto | `kind` (""), `engagement` ("") | `infra` |
+| `resolve_evidence` | auto | `evidence_id`, `status` (req: resolved\|wontfix\|promoted), `resolution` (""), `resolved_by` ("") | `infra` |
+
+The reuse sweep is DB-enforced: `add_validation_attempt` REFUSES a second
+attempt for the same `(entry, service, target)` with re-mint guidance — one
+honest attempt per service; a `hit` prompt says report_finding + resolve as
+`promoted` (which requires `resolved_by`). Kind-default TTLs: credential
+24h, scope_question never, others 7d. Rows carry the armed engagement slug
+automatically (see `engagement_lane.md`). Terminal-lane `infra` — callable
+past the tool budget.
+
+## utils/journal.py — dispatch journal (what-happened spine)
+
+| tool_id | alias | params | tags |
+|---|---|---|---|
+| `what_touched` | auto | `target` (req), `since_hours` (None), `limit` (100) | `infra`, `recon.scope` |
+
+The agent-facing READ surface of the journal: every dispatch whose `args`
+mention the target substring — "have we already scanned / logged into /
+dispatched against X?" is one call BEFORE re-running anything. Returns a
+prose listing (entry#, timestamp, lane/tool/status, engagement, result
+digest). Writes happen automatically at the executor choke point (one row
+per dispatch, all lanes) — never agent-called. Engagement
+arm/disarm/purge are operator-only REPL/CLI verbs (see
+`engagement_lane.md`), journaling is append-only by DB grants, and the
+whole lane degrades silently when Postgres is down.
 
 ## utils/packetcraft.py — 27 tools (all `net.raw`)
 

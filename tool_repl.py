@@ -3828,6 +3828,17 @@ def main():
         _scope_command(rest)
         return
 
+    elif mode == "engagement":
+        # Operator-only engagement cobweb control — the ONLY path to arm,
+        # disarm, and purge (same authority model as scope).
+        #   python tool_repl.py engagement on blue.htb [roe note...]
+        #   python tool_repl.py engagement off
+        #   python tool_repl.py engagement status
+        #   python tool_repl.py engagement purge blue.htb
+        rest = " ".join(args[1:])
+        _engagement_command(rest)
+        return
+
     elif mode == "search":
         if len(args) < 2:
             print("Usage: python tool_repl.py search <query>")
@@ -3849,7 +3860,7 @@ def main():
 
     else:
         print(f"Unknown mode: {mode}")
-        print("Modes: run, info, sweep, search, scope")
+        print("Modes: run, info, sweep, search, scope, engagement")
         print("Kernel lane: --kernel, --install-kernelspec")
         print("Or run without arguments for the interactive REPL.")
         sys.exit(1)

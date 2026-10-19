@@ -87,3 +87,51 @@ disappears once every unknown is closed.
 `report_finding` carries a `next_hints` entry nudging the secretary to sweep
 open ledger questions (e.g. creds pending validation) before continuing
 deeper.
+
+## evidence ledger (the promoted unknown ledger)
+
+**Successor to the unknown ledger** (which still runs in parallel and is
+being retired). The evidence store (2026-10-19 design,
+`utils/evidence.py`; Postgres schema `evidence` in
+`dockered/postgres/init/002_schemas.sql`, SQLite mirror at
+`evidence/evidence.db`) gives open items *typed kinds*, *TTLs*, and — the
+headline — a **database-enforced credential-reuse sweep**.
+
+Tools (all agent-callable, `infra` terminal lane, engagement-stamped
+automatically when the operator has armed an engagement):
+
+- `record_evidence(kind, summary, asset, content_json, source, scratch_ref,
+  ttl_hours)` — mint an open item: `credential` (recovered cred awaiting the
+  reuse sweep) | `service` (unprobed port/banner) | `ambiguity`
+  (contradictory/unclear result) | `scope_question` | `observation`.
+  `content_json` is a JSON object for the typed material (e.g.
+  `{"username": "svc_sql", "ntlm": "<hash>"}`) — stored as-is: secret
+  material is bounded by TTL + engagement purge, never mid-engage scrubbing.
+- `add_validation_attempt(evidence_id, service, target, outcome, note)` —
+  the reuse sweep, journalled: outcome is one of `hit|miss|error|undecided`.
+  **A second attempt against the same (entry, service, target) is REFUSED**
+  by the store with re-mint guidance — one honest attempt per service, then
+  move on. A `hit` reply says outright: report_finding (P2/P3), resolve as
+  `promoted`.
+- `list_open_evidence(kind, engagement)` — the sweep worklist: open items
+  with their attempt ledger attached; credential entries with ZERO attempts
+  are the standing next action.
+- `resolve_evidence(evidence_id, status, resolution, resolved_by)` — close
+  as `resolved` | `wontfix` | `promoted` (promoted REQUIRES the finding ID
+  in `resolved_by`, same contract as the unknown ledger).
+
+Retention defaults (env-tunable, see `.env.example`): credential material
+24h (the engagement floor), scope questions never expire (safety-adjacent),
+everything else 7d. Expired open entries are collected lazily by the
+retention sweep; resolved skeletons keep their readable summary + attempt
+ledger for reconciliation.
+
+Standing workflow after recovering ANY credential:
+
+1. `record_evidence(kind="credential", ...)` — pin the material while hot.
+2. Enumerate other reachable services that accept authentication
+   (ssh/smb/ftp/http-basic/http-form/mysql/postgres/winrm/...).
+3. `add_validation_attempt` exactly once per service — a miss means "not
+   reused here", a hit means `report_finding` immediately.
+4. `resolve_evidence(status="promoted", resolved_by="F-004")` when it
+   graduates to a finding.

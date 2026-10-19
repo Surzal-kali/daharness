@@ -126,7 +126,12 @@ CREATE INDEX IF NOT EXISTS idx_attempts_entry ON evidence.attempts (entry_id);
 -- is structural, not aspirational. (evidence does get UPDATE: status flips.)
 GRANT SELECT, INSERT ON journal.entries, evidence.entries, evidence.attempts
     TO brain_lane, gateway_lane, repl_lane;
-GRANT SELECT, INSERT, UPDATE ON evidence.entries TO brain_lane, gateway_lane, repl_lane;
+-- Evidence UPDATE is status-flip ONLY (column-level grants): lanes may flip
+-- open→resolved/wontfix/promoted but never rewrite summary/content/engagement
+-- — burying a resolution by editing history is as forbidden as erasure.
+GRANT SELECT, INSERT ON evidence.entries TO brain_lane, gateway_lane, repl_lane;
+GRANT UPDATE (status, resolved_by, updated_at, expires_at, scratch_ref, related_journal)
+    ON evidence.entries TO brain_lane, gateway_lane, repl_lane;
 GRANT SELECT, INSERT ON engagement.engagements TO brain_lane, gateway_lane, repl_lane;
 GRANT UPDATE ON evidence.attempts TO repl_lane;   -- operator-only correction
 -- Table grants do NOT confer schema entry: lanes + operator need USAGE on

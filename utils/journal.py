@@ -183,18 +183,42 @@ def new_run_ref() -> str:
     return f"jr:{secrets.token_hex(8)}"
 
 
+from constants import framework_tool  # noqa: E402  (decorator for the read tool)
+
+
+@framework_tool(
+    "Search the dispatch journal for every tool run whose arguments mention "
+    "a target — the scope-compliance / no-double-work query. Ground yourself "
+    "BEFORE re-running anything: 'have we already scanned / logged into / "
+    "dispatched against this host (or path, or domain)?' Returns matching "
+    "journal entries (timestamp, lane, tool, status, engagement, digest). "
+    "Read-only. Also answers target-mention questions like 'did we ever "
+    "touch 10.10.10.50' or 'which runs referenced /admin'.",
+    tags=["infra", "recon.scope"],
+)
 def what_touched(
     target: str,
-    *,
     since_hours: Optional[float] = None,
     limit: int = 100,
-) -> list:
+) -> str:
     """Every journal row whose args mention ``target`` — the scope-compliance
-    query. GIN-indexed containment search over args. Operator-facing; returns
-    raw rows for the REPL/doctor rather than a prose digest."""
+    query. GIN-indexed containment search over args — the journal is the
+    append-only spine of every lane's dispatches. Read-only + best-effort:
+    returns a prose-formatted listing (empty string when the DB lane is
+    down).
+
+    Args:
+        target: Host/IP/path/domain substring to search for, e.g.
+            "10.10.10.50" or "/admin" or "blue.htb".
+        since_hours: Optional recency window (e.g. 24 = last 24h only).
+        limit: Max rows to return (default 100).
+    """
     conn = engagement.connect()
     if conn is None:
-        return []
+        return (
+            "Journal lane unavailable (Postgres down) — cannot answer "
+            f"what_touched({target!r}) right now."
+        )
     q = f"%{target}%"
     sql = (
         "SELECT entry_id, ts, lane, tool_id, status, duration_s, "
@@ -211,11 +235,27 @@ def what_touched(
     try:
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            return cur.fetchall()
+            rows = cur.fetchall()
     except Exception as exc:
         logger.debug("[journal] what_touched failed: %s", exc)
         try:
             conn.rollback()
         except Exception:
             pass
-        return []
+        return f"Journal query failed: {exc}"
+
+    if not rows:
+        return f"No journal entries mention {target!r}."
+    lines: list = []
+    for (entry_id, ts, lane, tool_id, status, duration_s, digest, eng) in rows:
+        when = ts.strftime("%m-%d %H:%M") if ts else "?"
+        lines.append(
+            f"#{entry_id} [{when}] {lane}/{tool_id} {status}"
+            + (f" ({eng})" if eng else "")
+            + (f" {duration_s:.1f}s" if duration_s else "")
+            + (f" | {digest}" if digest else "")
+        )
+    header = f"{len(rows)} journal entr"
+    header += "y" if len(rows) == 1 else "ies"
+    header += f" mentioning {target!r}:" if len(rows) != 1 else f" mentioning {target!r}:"
+    return header + "\n" + "\n".join(lines)

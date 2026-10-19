@@ -130,9 +130,11 @@ def test_journal_write_is_silent_when_db_down(ws_root, no_postgres):
     assert entry_id is None  # skipped, not raised
 
 
-def test_journal_what_touched_empty_when_db_down(ws_root, no_postgres):
+def test_journal_what_touched_silent_when_db_down(ws_root, no_postgres):
     from utils.journal import what_touched
-    assert what_touched("10.0.0.5") == []
+    out = what_touched("10.0.0.5")
+    assert isinstance(out, str)
+    assert "unavailable" in out and "10.0.0.5" in out  # honest prose, no raise
 
 
 # ─── utils.evidence (sqlite mirror: real behavior, real constraints) ────────
