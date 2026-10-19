@@ -1,7 +1,3 @@
-# Full pinned development-venv export (361 packages — superseded by pyproject.toml
-# for framework installs; kept for reproducing the exact dev environment).
-# Install via: pip install -r requirements-dev.txt   (or: pip install -e ".[dev]")
-
 agent-client-protocol==0.11.1
 aiofile==3.12.3
 aiofiles==22.1.0
@@ -19,6 +15,7 @@ argcomplete==3.7.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
 arrow==1.4.0
+asn1crypto==1.5.1
 astroid==4.0.4
 asttokens==3.0.2
 async-lru==2.3.0
@@ -47,7 +44,9 @@ cloudpickle==3.1.2
 colorama==0.4.6
 comm==0.2.3
 cryptography==50.0.0
+curl_cffi==0.16.3
 cyclopts==5.2.0
+-e git+https://github.com/Surzal-kali/stuff.git@520a22d5585db3522dd51926b7a7834513210011#egg=daharness
 dask==2026.8.0
 dataclasses-json==0.6.7
 debugpy==1.8.22
@@ -132,6 +131,7 @@ jsonschema-path==0.5.0
 jsonschema-specifications==2025.9.1
 jupyter-events==0.12.1
 jupyter-lsp==2.3.1
+jupyter-server-ydoc==3.0.4
 jupyter-ydoc==4.1.1
 jupyter_ai==2.31.7
 jupyter_ai_acp_client==0.3.2
@@ -148,7 +148,6 @@ jupyter_server==2.21.1
 jupyter_server_fileid==0.9.3
 jupyter_server_mcp==0.3.0
 jupyter_server_terminals==0.5.4
-jupyter_server_ydoc==3.0.4
 jupyterlab==4.7.0a2
 jupyterlab-execute-time==3.3.0
 jupyterlab-git-core==0.55.0
@@ -226,6 +225,7 @@ opentelemetry-util-http==0.65b0
 orjson==3.12.0
 overrides==7.7.0
 packaging==25.0
+pandas==3.0.6
 pandocfilters==1.5.1
 papermill==2.7.0
 paramiko==5.0.0
@@ -234,6 +234,7 @@ partd==1.4.2
 pathable==0.6.0
 pathspec==1.1.1
 pexpect==4.9.0
+pg8000==1.31.5
 platformdirs==4.9.6
 playwright==1.63.0
 pluggy==1.6.0
@@ -242,6 +243,8 @@ prompt_toolkit==3.0.53
 propcache==0.5.2
 protobuf==6.33.6
 psutil==7.2.2
+psycopg==3.2.12
+psycopg-binary==3.2.12
 psygnal==0.16.1
 ptyprocess==0.7.0
 pure_eval==0.2.3
@@ -253,8 +256,8 @@ pybase64==1.5.0
 pycodestyle==2.12.1
 pycparser==3.0
 pycrdt==0.14.8
-pycrdt-websocket==0.16.5
 pycrdt-store==0.1.5
+pycrdt-websocket==0.16.5
 pycryptodomex==3.23.0
 pydantic==2.13.4
 pydantic-ai-slim==2.35.0
@@ -269,6 +272,7 @@ Pygments==2.20.0
 PyJWT==2.13.0
 pylint==4.0.10
 pymetasploit3==1.0.6
+PyMySQL==1.2.3
 PyNaCl==1.6.2
 pyOpenSSL==26.4.0
 pyperclip==1.11.0
@@ -305,6 +309,7 @@ rpds-py==2026.6.3
 ruff==0.15.13
 s3transfer==0.19.2
 scapy==2.7.0
+scramp==1.4.17
 SecretStorage==3.5.0
 Send2Trash==2.1.0
 shellingham==1.5.4
@@ -315,6 +320,7 @@ snowballstemmer==3.1.1
 sortedcontainers==2.4.0
 soupsieve==2.8.3
 SQLAlchemy==2.1.4
+sqlite-anyio==0.2.10
 sse-starlette==3.4.8
 sseclient-py==1.9.0
 stack-data==0.6.3

@@ -17,6 +17,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from typing import Any, Dict, Optional
 
 from pydantic import ValidationError
@@ -70,10 +71,12 @@ class ExecutorMixin:
         _args, _rej = normalize_arguments(arguments)
         if _rej is not None:
             logger.warning(f"[PREFLIGHT_REJECT] {manifest.module_id}: {_rej.get('error')}")
+            self._journal_reject(manifest.module_id, _rej, session_id)
             return _rej
         _rej = validate_against_manifest(_args, manifest)
         if _rej is not None:
             logger.info(f"[PREFLIGHT_REJECT] {manifest.module_id}: {_rej.get('error')}")
+            self._journal_reject(manifest.module_id, _rej, session_id)
             return _rej
         arguments = _args
 
@@ -82,6 +85,23 @@ class ExecutorMixin:
             f"[TOOL_EXECUTE] Executing Tool ID: {manifest.module_id} | Path: {manifest.implementation_path} | Args: {arguments} | Session: {session_id}"
         )
 
+        started = time.time()
+        try:
+            result = await self._dispatch_by_transport(manifest, arguments, session_id)
+            status = "error" if (not isinstance(result, dict) or result.get("status") not in ("Success", "unknown_delivery")) else "ok"
+        except Exception as exc:
+            logger.error(f"[TOOL_EXECUTE] {manifest.module_id} raised: {exc}", exc_info=True)
+            result = {"error": f"dispatch failed: {exc}", "status": "Failed"}
+            status = "error"
+        duration_s = time.time() - started
+
+        self._journal_dispatch(manifest, arguments, result, status, duration_s, session_id)
+        return result
+
+    async def _dispatch_by_transport(self, manifest: ToolManifest, arguments: dict, session_id: str):
+        """Transport dispatch — behavior identical to the original inline
+        branches (kept async; execute_tool awaits it so the journal can time
+        the whole path uniformly)."""
         if manifest.transport == TransportType.LOCAL_FILE:
             # Static-scan manifests (argparse modules) run as subprocesses of
             # the script itself; _execute_local_script also enforces the
@@ -92,26 +112,58 @@ class ExecutorMixin:
                 await self._execute_local_script(manifest.implementation_path, arguments),
             )
 
-        if manifest.transport == TransportType.BRAIN_DISPATCH:
-            return self._stamp_provenance(
-                manifest,
-                await self._execute_brain_tool(manifest.module_id, arguments, session_id=session_id),
-            )
-
-        if manifest.transport == TransportType.MCP_RPC:
+        if manifest.transport in (TransportType.BRAIN_DISPATCH, TransportType.MCP_RPC):
             # MCP_RPC tools (e.g. MetasploitClient.dispatch_metasploit) are async
             # methods on the same in-process class instances as the
-            # BRAIN_DISPATCH tools. There is no separate MCP endpoint to call,
-            # so route them through the identical Brain-first / in-process
-            # fallback path. The previous stub returned "pending" without ever
-            # invoking the method, which silently dropped every exploit
-            # execution (the module never fired, no session was created).
+            # BRAIN_DISPATCH tools — route them through the identical
+            # Brain-first / in-process fallback path.
             return self._stamp_provenance(
                 manifest,
                 await self._execute_brain_tool(manifest.module_id, arguments, session_id=session_id),
             )
 
         raise ValueError(f"Unsupported transport type: {manifest.transport}")
+
+    def _journal_dispatch(self, manifest, arguments, result, status, duration_s, session_id):
+        """Append one row to the engagement journal (best-effort, never
+        raises — the journal is additive and must not affect dispatch)."""
+        try:
+            from utils.journal import write_dispatch
+            from utils.engagement import lane_name
+            write_dispatch(
+                tool_id=manifest.module_id,
+                status=status,
+                lane=lane_name(),
+                args=arguments,
+                session_id=str(session_id),
+                duration_s=duration_s,
+                result=result,
+                approval_path=os.getenv("HARNESS_APPROVAL_PATH", "gateway"),
+                envelope_meta={
+                    "transport": manifest.transport.value,
+                    "untrusted_target": bool(getattr(manifest, "untrusted_target", False)),
+                },
+            )
+        except Exception:
+            logger.debug("[JOURNAL] dispatch row skipped (non-fatal)", exc_info=True)
+
+    def _journal_reject(self, tool_id: str, rejection: dict, session_id: str):
+        """Journal a preflight reject — a refused call is an auditable event
+        too (the 'we never ran that' side of the compliance query)."""
+        try:
+            from utils.journal import write_dispatch
+            from utils.engagement import lane_name
+            write_dispatch(
+                tool_id=tool_id,
+                status="error",
+                lane=lane_name(),
+                args=rejection.get("arguments") or {},
+                session_id=str(session_id),
+                approval_path=os.getenv("HARNESS_APPROVAL_PATH", "gateway"),
+                envelope_meta={"preflight_reject": True},
+            )
+        except Exception:
+            logger.debug("[JOURNAL] reject row skipped (non-fatal)", exc_info=True)
 
     @staticmethod
     def _stamp_provenance(manifest: ToolManifest, result: Any) -> Any:

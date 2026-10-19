@@ -251,7 +251,55 @@ open|resolved|wontfix|promoted — `promoted` requires the finding ID via
 (`utils.findings.` prefix) so they stay callable past the tool budget.
 `render_findings` output gains an **Open questions (unresolved)** appendix
 that renders even when zero findings exist. Inspired by REA's unknown ledger
-(morluto/rea).
+(morluto/rea). The ledger's successor — the typed evidence store with a
+DB-enforced credential-reuse sweep — lives in the section below.
+
+### Engagement cobweb + journal (`utils/engagement.py`, `utils/journal.py`, `utils/evidence.py`)
+
+One engagement slug ties every store row together so a **purge erases one
+engagement in one transaction** while the audit trail stays append-only
+until the operator closes it (2026-10-19 design):
+
+- **Arming is REPL-only** (`engagement on <slug>`), mirroring the scope
+  gate — deliberately not an `@framework_tool`, so the secretary can never
+  tag rows with a new key or erase the audit trail. State persists to
+  `engagement/.armed_engagement.json`, mtime-checked per dispatch; rows
+  written while disarmed carry NULL engagement and are engagement-bound.
+- **Postgres lane (optional)**: `dockered/docker-compose.yaml` gains a
+  `postgres` service (loopback-only publish, 2g cap); init scripts in
+  `dockered/postgres/init/` mint per-lane LOGIN roles (brain_lane /
+  gateway_lane / repl_lane), and only `harness_operator` may run
+  `engagement.purge()` — lanes hold INSERT/SELECT (+ evidence UPDATE), the
+  retention sweep (`engagement.sweep_expired()`) runs as a SECURITY DEFINER
+  owner function called lazily on journal writes. One database,
+  schema-per-store keeps the cobweb pull a single transaction and backup a
+  single `pg_dump`. Install with `pip install -e ".[db]"` (psycopg).
+- **Journal** (`journal.entries`): one row per dispatch, stitched across
+  lanes, written at the executor choke point (`execute_tool`, plus
+  preflight rejects). Append-only by grants. **Residency decision
+  (2026-10-19): no mid-engage scrubbing** — args keep secret material
+  verbatim because scrubbing live breaks the credential-reuse sweep;
+  bounds are structural instead (24h cred TTL floor + engagement purge +
+  `expires_at` sweep). The single redaction: session `handle` values become
+  `{"$sessref": session_id}` pointers (process-local meaning). Tiny
+  `result_digest` scalar summaries keep rows meaningful after material
+  expiry. `what_touched(target)` = GIN-cached scope-compliance query.
+- **Evidence** (`utils/evidence.py`): the unknown ledger promoted — typed
+  kinds (credential|service|ambiguity|scope_question|observation) with a
+  per-kind TTL (credential 24h, scope_question never, others 7d) and the
+  **credential-reuse sweep as a DB constraint**: `UNIQUE(entry_id, service,
+  target)` on `evidence.attempts` refuses a second validation attempt with
+  re-mint guidance (re-acquisition is cheap, brute-forcing isn't).
+  Phase 1 ships SQLite-backed (same schema); the PG lane takes over when
+  psycopg + the container are up. Tools: `record_evidence` /
+  `add_validation_attempt` / `list_open_evidence` / `resolve_evidence`.
+- **Envelope contract**: `daharness/models.py:ExecutionEnvelope` (+
+  `EnvelopeMeta`/`Provenance`/`BudgetDirective`) pins the dispatch-result
+  shape the kernel helpers and per-lane workarounds were guessing at —
+  budget directives are a top-level model field so projection can never
+  clobber them, provenance is stamped once. Writers still emit the legacy
+  dict shape; readers migrate via `from_legacy()` / warn-mode validation
+  (`to_legacy()` keeps old consumers green during the window).
 
 ### Analysis snapshot cache (`utils/snapshot_cache.py` + `auxiliaries/radare2.py`)
 

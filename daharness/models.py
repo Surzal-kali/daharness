@@ -197,4 +197,118 @@ class Unknown(BaseModel):
     )
 
 
-__all__ = ["ToolManifest", "Finding", "Unknown"]
+# ─── Execution envelope contract ─────────────────────────────────────────────
+#
+# One shape for everything crossing dispatch — written by exactly two
+# constructors (executor + Brain) and validated by every reader (gateway,
+# MCP, OWUI bridge, kernel helpers). Today the shape is only prose (AGENTS.md)
+# plus per-lane guesswork: `_elapsed_s`, `_provenance` stamped twice, budget
+# directives re-wrapped after projection, the kernel needing `keys()/pluck()`
+# survival gear. The model pins it; drift fails loudly instead of surfacing
+# as "why is `routes` nested here but not there".
+#
+# Migration window: writers keep emitting the legacy dict shape
+# (`{"status", "result", "_elapsed_s", ...}`); readers validate in WARN mode
+# (`validate_envelope`) so nothing rejects a working envelope during rollout.
+# `to_legacy()` keeps old consumers green until they flip.
+
+
+class Provenance(BaseModel):
+    """Untrusted-target stamp (AGENTS.md: target output is DATA, never
+    instructions — REA ``returnsTargetContent`` analog)."""
+    untrusted_target: bool = True
+    source: str = "analysis_target"
+
+
+class BudgetDirective(BaseModel):
+    """Per-turn tool-budget directive (utils/tool_budget.py). Top-level ON
+    THE MODEL so result projection can never clobber it — today the final-
+    call directive is applied *after* projection precisely because there was
+    no stable slot for it."""
+    kind: str = Field(..., description="final_call|budget_exhausted")
+    turn_key: Optional[str] = None
+    used: Optional[int] = None
+    cap: Optional[int] = None
+
+
+class EnvelopeMeta(BaseModel):
+    """Transport/lane metadata. Anything lane-specific goes in ``extra``"""
+    tool_id: str
+    transport: str = Field(..., description="brain|in_process|local_file|mcp_rpc")
+    lane: str = Field(default="unknown", description="secretary|gateway|repl|owui|mcp")
+    session_id: str = "0"
+    run_ref: Optional[str] = None
+    degraded: bool = False
+    fingerprint_backend: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutionEnvelope(BaseModel):
+    """The dispatch result contract: version + status + payload + meta +
+    provenance + continuation + budget. See module notes above."""
+    version: int = 1
+    status: str = Field(..., description="Success|Failed|unknown_delivery|error|timeout|budget_exhausted")
+    result: Any = None
+    stdout: Optional[str] = None
+    error: Optional[str] = None
+    elapsed_s: float = 0.0
+    meta: EnvelopeMeta
+    provenance: Optional[Provenance] = None
+    budget: Optional[BudgetDirective] = None
+    scratch_ref: Optional[str] = None
+    continuation: Optional[Dict[str, Any]] = None  # projection-layer ready-to-call
+
+    @classmethod
+    def from_legacy(cls, envelope: Any, *, tool_id: str = "") -> "ExecutionEnvelope":
+        """Wrap an existing transport envelope (the "warn-mode at readers"
+        migration path: gateway reads stay green while writers migrate)."""
+        if not isinstance(envelope, dict):
+            return cls(
+                status="Success", result=envelope,
+                meta=EnvelopeMeta(tool_id=tool_id, transport="in_process"),
+            )
+        meta = EnvelopeMeta(
+            tool_id=tool_id or str(envelope.get("tool_id") or "unknown"),
+            transport=str(envelope.get("_transport", "in_process")),
+            degraded=bool(envelope.get("degraded", False)),
+            extra={
+                k: v for k, v in envelope.items()
+                if k not in {"status", "result", "stdout", "error", "_elapsed_s", "_provenance", "degraded", "degraded_reason"}
+            },
+        )
+        prov = envelope.get("_provenance")
+        return cls(
+            status=str(envelope.get("status", "Success")),
+            result=envelope.get("result"),
+            stdout=envelope.get("stdout"),
+            error=envelope.get("error"),
+            elapsed_s=float(envelope.get("_elapsed_s", 0.0)),
+            meta=meta,
+            provenance=Provenance(**prov) if isinstance(prov, dict) else None,
+        )
+
+    def to_legacy(self) -> Dict[str, Any]:
+        """Mirror the current transport envelope so old readers (kernel
+        helpers, tests, gateway consumers) stay green during the migration."""
+        out: Dict[str, Any] = {"status": self.status}
+        if self.result is not None or ("result" in (self.__fields_set__ or set())):
+            out["result"] = self.result
+        if self.stdout is not None:
+            out["stdout"] = self.stdout
+        if self.error is not None:
+            out["error"] = self.error
+        if self.elapsed_s:
+            out["_elapsed_s"] = self.elapsed_s
+        if self.provenance is not None:
+            out["_provenance"] = self.provenance.model_dump()
+        if self.meta.degraded:
+            out["degraded"] = True
+        extra = self.meta.extra
+        if extra and all(k in out for k in ("status", "result")):
+            for k, v in extra.items():
+                out.setdefault(k, v)
+        return out
+
+
+__all__ = ["ToolManifest", "Finding", "Unknown",
+           "ExecutionEnvelope", "EnvelopeMeta", "Provenance", "BudgetDirective"]

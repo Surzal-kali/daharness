@@ -77,6 +77,59 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Postgres — the engagement hive-mind DB (2026-10-19 design). One database,
+  # schema-per-store: engagement (cobweb key + registry), journal (append-only
+  # per-dispatch spine), evidence (the promoted unknown ledger). Init scripts
+  # in ./postgres/init run in name order on FIRST boot of this volume: roles
+  # (001_roles.sh) → schemas+grants (002_schemas.sql) → purge/sweep functions
+  # (003_functions.sql).
+  #
+  # Roles are the audit story: lanes INSERT/SELECT (evidence also UPDATE), no
+  # lane ever holds DELETE — the retention sweep runs as an owner-executed
+  # SECURITY DEFINER function, and only harness_operator may run
+  # engagement.purge() (same authority model as the scope gate: the secretary
+  # can never erase the record of what it did).
+  #
+  # Published on loopback only — a server holding live creds during an
+  # engagement must not listen on the LAN. Container lanes (jupyter, future
+  # lanes) reach it over the workbench network by DNS name `postgres`.
+  # Passwords: set these in dockered/.env (gitignored) before first volume
+  # boot — the init scripts bake them once; changing them afterwards means
+  # `docker compose down -v` or manual ALTER ROLE.
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    networks:
+      workbench:
+        ipv4_address: 172.28.0.20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-harness_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in dockered/.env}
+      - POSTGRES_DB=${POSTGRES_DB:-harness}
+      - HARNESS_DB_OPERATOR_PASSWORD=${HARNESS_DB_OPERATOR_PASSWORD:-harness_operator_change_me}
+      - HARNESS_DB_BRAIN_PASSWORD=${HARNESS_DB_BRAIN_PASSWORD:-harness_brain_change_me}
+      - HARNESS_DB_GATEWAY_PASSWORD=${HARNESS_DB_GATEWAY_PASSWORD:-harness_gateway_change_me}
+      - HARNESS_DB_REPL_PASSWORD=${HARNESS_DB_REPL_PASSWORD:-harness_repl_change_me}
+    # 2GB cap: idle Postgres is a few hundred MB; shared_buffers at this VM's
+    # scale stays small. The triage (2026-10-19, full avg10=0.00) says there
+    # is room, but a cap keeps a runaway analytics query from repeating the
+    # open-webui OOM story on the host lane.
+    mem_limit: 2g
+    memswap_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-harness_admin} -d ${POSTGRES_DB:-harness}"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Open WebUI — chat front end layered over the framework.
   # Talks to Ollama directly at 10.10.10.128:11434 (LLM, host lane enp92s0 —
   # the lab-switch lane is routed and SNATed downwind, so containers reach it
@@ -306,6 +359,7 @@ services:
 volumes:
   open-webui-data:
   code-server-config:
+  pgdata:
 
 
 networks:

@@ -2672,6 +2672,13 @@ Tool REPL commands:
                          out-of-scope destinations; operator-only, not exposed
                          to the agent). 'scope off' disarms (lab mode).
   scope status|off|add-ip <ip> [<hostname>]|rm-ip <ip>|list-ips|search <kw> [--assets]
+  engagement on <slug> [<roe_note>]   Arm the engagement cobweb key (operator-only,
+                         not exposed to the agent): journal + evidence rows across
+                         every lane carry the slug so 'engagement purge <slug>'
+                         erases one engagement in one transaction. 'engagement off'
+                         disarms (rows keep their slug). Credential material is
+                         bounded by the 24h floor, not mid-engage scrubbing.
+  engagement status|purge <slug>
   help                   This message
   quit / exit            Leave the REPL
 
@@ -2703,9 +2710,113 @@ def _find_manifest(tool_id: str, manifests: List[ToolManifest]) -> Optional[Tool
     return None
 
 
+def _engagement_command(rest: str):
+    """Handle the ``engagement`` REPL command — operator-only engagement
+    cobweb key (arm/disarm/status/purge).
+
+    This is the ONLY control surface for engagement arming and the ONLY
+    purge path; deliberately not exposed as an ``@framework_tool``, so the
+    secretary can never tag rows with a new engagement key or erase the
+    audit trail (same authority model as the scope gate). Arming writes
+    ``engagement/.armed_engagement.json`` (mtime-checked every dispatch);
+    purge runs under the operator DB role against BOTH lanes (Postgres
+    engagement.purge() + the SQLite evidence mirror) and requires the
+    engagement to be closed — export findings (render_findings) first.
+    """
+    from utils import engagement as eng
+
+    try:
+        parts = shlex.split(rest)
+    except ValueError as e:
+        print(f"  Argument parse error: {e}")
+        return
+    if not parts:
+        print("  Engagement cobweb (operator-only — not exposed to the agent).")
+        print("  One slug ties journal + evidence rows across every lane so a")
+        print("  purge erases an engagement in one transaction, while live")
+        print("  credential material is bounded by the 24h floor instead of")
+        print("  mid-engage scrubbing.")
+        print("  Commands:")
+        print("    engagement on <slug> [<roe_note>]   (arm; registers in the DB when up)")
+        print("    engagement off                      (disarm; rows stay)")
+        print("    engagement status")
+        print("    engagement purge <slug>             (close + erase journal/evidence; render_findings FIRST)")
+        st = eng.db_status()
+        armed = st.get("armed_engagement")
+        if armed:
+            print(f"  Current: ARMED — {armed}   db: {'connected as ' + st['role'] if st.get('connected') else 'UNAVAILABLE (sqlite mirror only)'}")
+        else:
+            print("  Current: disarmed (dispatches journal with NULL engagement)")
+        return
+
+    sub = parts[0].lower()
+
+    if sub == "on":
+        if len(parts) < 2:
+            print("  Usage: engagement on <slug> [<roe_note>]")
+            return
+        slug = parts[1]
+        note = " ".join(parts[2:])
+        state = eng.arm(slug, note)
+        st = eng.db_status()
+        db_note = (
+            f"DB connected as {st.get('role')}"
+            if st.get("connected")
+            else "DB unavailable — armed locally only (journal rows will carry the slug once the DB is up)"
+        )
+        print(f"  Engagement armed: {state['slug']}" + (f" — roe: {note}" if note else ""))
+        print(f"  {db_note}")
+
+    elif sub == "off":
+        eng.disarm()
+        print("  Engagement disarmed (existing rows keep their slug).")
+
+    elif sub == "status":
+        st = eng.db_status()
+        print(f"  armed:  {st.get('armed_engagement') or '(disarmed)'}")
+        print(f"  db:     {'connected as ' + st.get('role', '?') if st.get('connected') else 'unavailable'}")
+        if st.get("server"):
+            print(f"  server: {st.get('server')}")
+
+    elif sub == "purge":
+        if len(parts) < 2:
+            print("  Usage: engagement purge <slug>")
+            print("  Render findings first: report_finding chains -> render_findings;")
+            print("  a purge erases journal + evidence for the slug and cannot be undone.")
+            return
+        slug = parts[1]
+        confirm = input(
+            f"  Purge ALL journal + evidence rows for '{slug}'? Type the slug to confirm: "
+        ).strip()
+        if confirm != slug:
+            print("  Aborted (slug did not match).")
+            return
+        try:
+            rows = eng.close_and_purge(slug)
+        except RuntimeError as e:
+            print(f"  Purge refused: {e}")
+            return
+        local = _local_evidence_purge(slug)
+        print(f"  Purged (Postgres): " + ", ".join(f"{s}={n}" for s, n in rows))
+        print(f"  Purged (sqlite evidence mirror): {local} entries")
+
+    else:
+        print(f"  Unknown engagement subcommand: {sub}")
+
+
+def _local_evidence_purge(slug: str) -> int:
+    """Best-effort purge of the phase-1 SQLite evidence mirror (the PG lane
+    is authoritative when up; this keeps both honest when it isn't)."""
+    try:
+        from utils.evidence import get_store
+        return get_store().purge_engagement(slug)
+    except Exception as e:
+        print(f"  (sqlite mirror purge skipped: {e})")
+        return 0
+
+
 def _scope_command(rest: str):
     """Handle the ``scope`` REPL command — operator-only packet-scope gate.
-
     This is the ONLY control surface for the packet-scope gate; it is
     deliberately not exposed as an ``@framework_tool``, so the secretary
     agent cannot arm/disarm or bless IPs.  When armed, ``send_packet``
@@ -3305,6 +3416,9 @@ async def repl_loop(manifests: List[ToolManifest]):
 
         elif cmd == "scope":
             _scope_command(rest)
+
+        elif cmd == "engagement":
+            _engagement_command(rest)
 
         else:
             print(f"  Unknown command: {cmd}. Type 'help' for commands.")
