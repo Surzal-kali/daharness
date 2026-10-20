@@ -48,6 +48,41 @@ except ImportError:
     pass
 
 
+def _normalise_tool_id(tool_id: str) -> str:
+    """Accept jedi-style call form — ``run utils.journal.what_touched()``.
+
+    IPython/jedi suggest tools as call sites, so operators type the ``()``
+    call form into ``run`` / ``info`` / ``resolve``. It is not part of the
+    tool_id.
+    """
+    return tool_id.removesuffix("()")
+
+
+def _find_tool_live(
+    tool_id: str,
+    manifests: List[ToolManifest],
+    completer: Optional[ToolReplCompleter] = None,
+) -> tuple[Optional[ToolManifest], List[ToolManifest]]:
+    """Manifest lookup with a one-shot live re-discovery on a miss.
+
+    The ``repl>`` loop holds the manifest snapshot taken at startup
+    (``reindex`` refreshes it), while jedi/IPython introspect live modules —
+    so a newly added tool autocompletes minutes before the loop can run it.
+    On a lookup miss, re-discover once and adopt the fresh list (refreshing
+    the completer) when it gains the tool.
+    """
+    m = find_manifest(tool_id, manifests)
+    if m is not None:
+        return m, manifests
+    fresh = discover_tools()
+    m = find_manifest(tool_id, fresh)
+    if m is not None:
+        if completer is not None:
+            completer.refresh(fresh)
+        return m, fresh
+    return None, manifests
+
+
 def repl_help():
     print("""
 Tool REPL commands:
@@ -164,7 +199,7 @@ async def repl_loop(manifests: List[ToolManifest]):
             if not rest:
                 print("  Usage: info <tool_id>")
                 continue
-            m = find_manifest(rest, manifests)
+            m, manifests = _find_tool_live(_normalise_tool_id(rest), manifests, completer)
             if m is None:
                 if not any(rest in mm.module_id for mm in manifests):
                     print(f"  No tool found matching '{rest}'")
@@ -175,7 +210,7 @@ async def repl_loop(manifests: List[ToolManifest]):
             if not rest:
                 print("  Usage: resolve <tool_id>")
                 continue
-            func, err = resolve_callable(rest)
+            func, err = resolve_callable(_normalise_tool_id(rest))
             if func is None:
                 print(f"  ✗ Resolve failed: {err}")
             else:
@@ -198,10 +233,10 @@ async def repl_loop(manifests: List[ToolManifest]):
             except ValueError as e:
                 print(f"  Argument parse error (unbalanced quotes?): {e}")
                 continue
-            tool_id = tokens[0]
+            tool_id = _normalise_tool_id(tokens[0])
             arg_tokens = tokens[1:]
 
-            m = find_manifest(tool_id, manifests)
+            m, manifests = _find_tool_live(tool_id, manifests, completer)
             if m is None:
                 if not any(tool_id in mm.module_id for mm in manifests):
                     print(f"  Unknown tool: {tool_id}")
@@ -279,6 +314,7 @@ async def oneshot_run(tool_id: str, arg_tokens: List[str]):
     from replkit.core import safe_default_arguments
 
     manifests = discover_tools()
+    tool_id = _normalise_tool_id(tool_id)
     m = find_manifest(tool_id, manifests)
     if m is None:
         print(f"Unknown tool: {tool_id}")
@@ -299,6 +335,7 @@ async def oneshot_run(tool_id: str, arg_tokens: List[str]):
 async def oneshot_info(tool_id: str):
     """Show info for a single tool, then exit."""
     manifests = discover_tools()
+    tool_id = _normalise_tool_id(tool_id)
     m = find_manifest(tool_id, manifests)
     if m is None:
         print(f"No tool found matching '{tool_id}'")
