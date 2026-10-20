@@ -95,3 +95,4 @@ dabooks/damill/*
 !dabooks/damill/README.md
 # Docker CLI config dir from the code-server docker lane (DOCKER_HOME pins it to the tree root)
 /.docker/
+*.db
