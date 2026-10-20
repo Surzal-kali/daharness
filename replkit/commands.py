@@ -95,9 +95,10 @@ Tool REPL commands:
   run <tool_id> [--flag value ...]   Run a tool with flag args (schema-aware)
   run <tool_id> --json '{...}'       Run a tool with JSON args
   run <tool_id>          Run with safe-default args (if defined)
-  selftest [pytest args] Run the pytest suite (replaces the legacy sweep):
+  selftest [pytest args] Run the pytest suite (replaces the legacy sweep);
+                         fires from any directory (anchored to the repo root):
                          selftest                      → python -m pytest tests/ -q
-                         selftest test_scope_gate      → one file
+                         selftest test_scope_gate      → one file (tests/-anchored)
                          selftest -k budget            → passthrough of pytest args
   reindex                Re-discover tools
   ipython                Drop into IPython with tools as named async callables

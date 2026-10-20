@@ -284,22 +284,37 @@ class TestGateLogic:
         arm() with a raw PermissionError instead of degrading to a cache
         miss. A MISSING root now resolves to the running checkout instead
         (constants.resolve_workspace_root lane safety), so the degrade is
-        pinned with a root that EXISTS but is unwritable."""
+        pinned with a root that EXISTS but is unwritable.
+
+        The unwritability is faked at the one syscall the function makes
+        into that root (``d.mkdir()``) rather than chmod(0o000): a literal
+        chmod-000 root only fences non-root runners — a root pytest seat
+        (the host lane's ``pytest-of-root`` tmpdir) traverses it via
+        CAP_DAC_OVERRIDE, so mkdir SUCCEEDED there and the degrade never
+        fired (2026-10-20 host selftest failure). The stub raises the same
+        PermissionError on every seat; the tmp fallback below still runs
+        for real, so the except-branch stays genuinely exercised.
+        """
         import tempfile
 
         import auxiliaries.program_scope as _ps
 
         unwritable = tmp_path / "unwritable-root"
         unwritable.mkdir()
-        unwritable.chmod(0o000)
-        try:
-            monkeypatch.setenv("WORKSPACE_ROOT", str(unwritable))
-            p = _ps._scope_cache_path("synthetic", "h1")
-            fallback_root = Path(tempfile.gettempdir()) / "framework-scope-cache"
-            assert str(p).startswith(str(fallback_root)), p
-            assert p.parent.is_dir(), p
-        finally:
-            unwritable.chmod(0o700)
+        scope_dir = str(unwritable / "scope")
+        real_mkdir = Path.mkdir
+
+        def _denied_mkdir(self, *args, **kwargs):
+            if str(self) == scope_dir:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "mkdir", _denied_mkdir)
+        monkeypatch.setenv("WORKSPACE_ROOT", str(unwritable))
+        p = _ps._scope_cache_path("synthetic", "h1")
+        fallback_root = Path(tempfile.gettempdir()) / "framework-scope-cache"
+        assert str(p).startswith(str(fallback_root)), p
+        assert p.parent.is_dir(), p
 
     def test_disarm_restores_lab_mode(self, scope):
         _arm()

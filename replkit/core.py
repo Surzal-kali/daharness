@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import traceback
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from daharness.models import ToolManifest
@@ -27,6 +28,12 @@ from replkit.safe_args import SAFE_ARGS
 # pytest's console entry point (the bare binary is NOT on PATH in every
 # container lane — always invoke through the interpreter).
 _PYTEST_ARGS = [sys.executable, "-m", "pytest"]
+
+# The selftest macro's anchor: pytest is always spawned with this as cwd and
+# passthrough args are resolved against it, so ``tool_repl.py selftest`` works
+# from any working directory (REPL, operator shell alias, CI) — the macro used
+# to pass a rootdir-relative ``tests/`` and silently require the repo root cwd.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ── Lightweight executor (no ChromaDB, no secretary) ─────────────────────────
@@ -253,28 +260,63 @@ def _coerce_value(raw: str, schema_type: str) -> Any:
 # but the real test suite already covers that ground deterministically, and
 # sweep's safe-args table duplicated it while tools that hit the armed scope
 # gate just errored in bulk. Shelling out to pytest from the REPL reuses the
-# exact same function slots a CI run uses:
+# exact same function slots a CI run uses. The spawn is anchored to the repo
+# root (cwd + arg anchoring) so the macro fires from any directory:
 #
-#     repl> selftest                  → python -m pytest tests/ -q
-#     repl> selftest test_scope_gate  → one file
+#     repl> selftest                  → python -m pytest <root>/tests -q
+#     repl> selftest test_scope_gate  → tests/test_scope_gate.py
 #     repl> selftest -k budget        → passthrough of pytest args
+
+
+def _anchor_pytest_arg(arg: str) -> str:
+    """Map a passthrough pytest arg onto the repo root (cwd-independent).
+
+    Bare test names get the ``tests/`` anchoring the help text documents
+    (``test_scope_gate`` → ``tests/test_scope_gate.py``); repo-relative paths
+    pass through and resolve because pytest is spawned with the repo root as
+    cwd. Absolute paths and flags (``-k``, ``-x``, ``--tb=short``, …) are
+    untouched. A file found under the *caller's* cwd is anchored absolute —
+    the only case whose cwd cannot be assumed. Unknown tokens pass through
+    so pytest surfaces its own honest "file not found" error.
+    """
+    if not arg or arg.startswith("-") or Path(arg).is_absolute():
+        return arg
+    file_part, sep, node_rest = arg.partition("::")
+    for cand in (file_part, f"tests/{file_part}", f"tests/{file_part}.py"):
+        if (_REPO_ROOT / cand).exists():
+            return cand + (f"::{node_rest}" if sep else "")
+    caller_file = Path.cwd() / file_part
+    if caller_file.exists():
+        return str(caller_file) + (f"::{node_rest}" if sep else "")
+    return arg
+
+
+def _selftest_argv(extra_args: Optional[List[str]] = None) -> List[str]:
+    """Build the selftest macro's pytest argv (see :func:`run_selftest`).
+
+    No extras runs the full ``tests/`` tree quiet; passthrough args are
+    anchored to the repo root by :func:`_anchor_pytest_arg`.
+    """
+    extra = [a for a in (extra_args or []) if a not in ("--force", "-f")]
+    if not extra:
+        return list(_PYTEST_ARGS) + [str(_REPO_ROOT / "tests"), "-q"]
+    return list(_PYTEST_ARGS) + [_anchor_pytest_arg(a) for a in extra]
+
 
 def run_selftest(extra_args: Optional[List[str]] = None) -> int:
     """Run the pytest suite as a REPL macro. Returns pytest's exit code.
 
-    Passthrough args go straight to pytest (files, -k expressions, -x, …).
-    ``--force``/``-f`` are accepted-and-ignored so old ``sweep --force``
-    muscle memory doesn't error — they carry no meaning in the pytest lane.
+    Cwd-independent — fires the same from the REPL, an operator shell alias,
+    or CI: pytest is spawned with the repo root as cwd and passthrough args
+    are anchored there (``test_scope_gate`` → ``tests/test_scope_gate.py``;
+    ``-k``-style flags untouched). ``--force``/``-f`` are accepted-and-ignored
+    so old ``sweep --force`` muscle memory doesn't error — they carry no
+    meaning in the pytest lane.
     """
-    argv = list(_PYTEST_ARGS)
-    extra = [a for a in (extra_args or []) if a not in ("--force", "-f")]
-    if not extra:
-        argv += ["tests/", "-q"]
-    else:
-        argv += extra
+    argv = _selftest_argv(extra_args)
     print(f"  [selftest] {' '.join(argv)}")
     try:
-        return subprocess.run(argv).returncode
+        return subprocess.run(argv, cwd=str(_REPO_ROOT)).returncode
     except KeyboardInterrupt:
         print("  [selftest] interrupted")
         return 130
