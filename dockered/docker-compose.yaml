@@ -2,9 +2,14 @@
 # Framework workbench: Open WebUI + JupyterLab + code-server
 #
 # Trimmed 2026-10-21 to these three services — the old chroma + postgres
-# entries (and dockered/README.md) went with the retired harness repo; the
-# framework itself ships as the daharness .deb (/usr/share/daharness, systemd
-# services) and the bind mounts get re-pointed there if a rebuild is needed.
+# entries (and dockered/README.md) went with the retired harness repo.
+# The framework ships as the daharness .deb: code tree bind-mounted from
+# /usr/share/daharness, Brain socket /run/daharness/brain.sock, shared state
+# root /var/lib/daharness (both PATH-identical). START ORDER MATTERS:
+# `sudo systemctl enable --now daharness` BEFORE `compose up -d` —
+# /run/daharness is the unit's RuntimeDirectory tmpfs; binds carry
+# create_host_path=false so up fails loudly instead of docker silently
+# mkdir-ing an empty dir that the daemon's tmpfs would then overmount.
 #
 # Open WebUI:  http://localhost:3000      (chat front end; LLM = host Ollama)
 # JupyterLab:  http://localhost:8888      (tool nursery, JUPYTER_TOKEN)
@@ -72,7 +77,12 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   jupyter:
     build:
-      context: ..
+      context: .. # carries the Dockerfile + the root requirements.txt the image COPYs
+      # The framework's build-time copy comes from the deb's installed tree
+      # via a named context (the deb ships no requirements.txt, so that one
+      # file still COPYs off the main repo context).
+      additional_contexts:
+        framework-src: /usr/share/daharness
       dockerfile: dockered/jupyter.Dockerfile
     ports:
       - "8888:8888" # published on all host interfaces (operator choice — reaches the lab lanes)
@@ -95,8 +105,28 @@ services:
     dns:
       - 172.28.0.1
     volumes:
-      - /home/kali/github/daharness:/home/jovyan/framework
-      - /home/kali/github/daharness/dabooks:/home/jovyan/work       # notebooks — on host, git init here for version control
+      # The deb's framework tree. Read-only IN PRACTICE (root:root files):
+      # the container reads tool code, nothing writes into it — stub gen
+      # writes /opt/... + work/, and the ruff.toml builtins side-block is a
+      # checkout-only lane the deb tree omits by design (generator warns).
+      # dabooks notebooks lane: gone with the retired repo — /home/jovyan/work
+      # is now the image's own dir (kernel --ServerApp.root_dir unchanged).
+      - /usr/share/daharness:/home/jovyan/framework
+      # Shared state, PATH-IDENTICAL so constants resolve identically in- and
+      # out-of-container: cookie jar/ids.db/scratch live beside the daemon's
+      # /var/lib/daharness; brain.sock rides the daemon's runtime tmpfs.
+      # create_host_path=false → compose up refuses to start before the
+      # daemon (wrong-source mkdir would be shadowed when the tmpfs lands).
+      - type: bind
+        source: /var/lib/daharness
+        target: /var/lib/daharness
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/daharness
+        target: /run/daharness
+        bind:
+          create_host_path: false
       - /home/kali/jupyter-home/.ipython:/home/jovyan/.ipython   # IPython history survives recreates
 
       # Persist notebook-intelligence settings + the stored GitHub token so
@@ -125,6 +155,10 @@ services:
       # it drives) default to localhost:11434, but Ollama runs on the host
       # lab lane — same address the open-webui service uses for its LLM.
       - OLLAMA_HOST=http://192.168.56.1:11434
+      # Host lane wiring (post-.deb): Brain socket + the daemon's shared
+      # state root — see the PATH-identical mounts above + header start order.
+      - BRAIN_SOCKET=/run/daharness/brain.sock
+      - WORKSPACE_ROOT=/var/lib/daharness
     command:
       - start-notebook.py
       - --ServerApp.ip=0.0.0.0
@@ -132,6 +166,8 @@ services:
       - --ServerApp.token=${JUPYTER_TOKEN}
       - --ServerApp.root_dir=/home/jovyan/work
       - --MappingKernelManager.default_kernel_name=daharness
+    group_add:
+      - "120" # host daharness GID — group rwx on /run/daharness (0770) + /var/lib/daharness (2770 setgid)
     # Custom healthcheck — two reasons we don't use the base image's
     # docker_healthcheck.py here:
     #   1. The stock script's ~1s budget can't cover this image (nbi + MCP
@@ -187,6 +223,8 @@ services:
   code-server:
     build:
       context: ..
+      additional_contexts:
+        framework-src: /usr/share/daharness
       dockerfile: dockered/code-server.Dockerfile
     ports:
       - "8443:8443" # container serves HTTPS with a self-signed cert
@@ -215,9 +253,14 @@ services:
       # TLS IP-SANs for the LAN addresses the editor is browsed on — webview
       # service workers die with a localhost-only cert (see README).
       - CODE_SERVER_CERT_SANS=IP:10.0.0.42,IP:192.168.56.108
+      # Host lane wiring (post-.deb): Brain socket + the daemon's shared state
+      # root. PATH-identical mounts below carry both; create_host_path=false
+      # enforces daemon-first start ordering (see compose header + jupyter).
+      - BRAIN_SOCKET=/run/daharness/brain.sock
+      - WORKSPACE_ROOT=/var/lib/daharness
     volumes:
       - code-server-config:/config # extensions, settings, history
-      - /home/kali/github/daharness:/config/workspace # live tree; lsio prunes this path from its boot chown → run/brain.sock reachable
+      - /usr/share/daharness:/config/workspace # the deb's tree (root:root → operator writes fail honestly; edit the lane repo via the PATH-identical mount below)
       # Docker lane (with group_add below): second mount of the work tree,
       # PATH-IDENTICAL to the host — when compose runs INSIDE this container
       # (-f on the shared tree), ./-relative bind sources must resolve on the
@@ -229,11 +272,28 @@ services:
       # 2026-10-18): anything in this container fully drives the daemon.
       # Do NOT chmod 666 the socket — chmod acts on the HOST's socket.
       - /var/run/docker.sock:/var/run/docker.sock
+      # The deb tree at its HOST path too — PATH-IDENTICAL, so an in-editor
+      # `docker compose build` resolves the build.additional_contexts named
+      # context (/usr/share/daharness) against the right files on both sides.
+      - /usr/share/daharness:/usr/share/daharness
+      # Shared state roots, PATH-IDENTICAL to the daemon (jupyter section
+      # explains why both mounts + create_host_path=false start-ordering).
+      - type: bind
+        source: /var/lib/daharness
+        target: /var/lib/daharness
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/daharness
+        target: /run/daharness
+        bind:
+          create_host_path: false
       - ./code-server-init/00-extensions-and-continue.sh:/custom-cont-init.d/00-extensions-and-continue.sh:ro
       - ./code-server-init/05-docker-socket-access.sh:/custom-cont-init.d/05-docker-socket-access.sh:ro
       - ./code-server-init/10-framework-runtime.sh:/custom-cont-init.d/10-framework-runtime.sh:ro
     group_add:
       - "967" # HOST socket GID from `stat -c %g /var/run/docker.sock` — re-sync if the daemon group ever changes. Covers root/exec lanes only: lsio's s6 user-drop discards these GIDs for the abc process, which 05-docker-socket-access.sh repairs via /etc/group membership.
+      - "120" # host daharness GID — group rwx on /run/daharness (0770) + /var/lib/daharness (2770 setgid)
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8443' || exit 1"]
       interval: 60s

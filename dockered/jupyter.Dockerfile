@@ -97,18 +97,20 @@ COPY dockered/10-refresh-stubs.sh /usr/local/bin/before-notebook.d/10-refresh-st
 RUN chmod +x /usr/local/bin/before-notebook.d/10-refresh-stubs.sh
 
 # Framework copy for build-time stub generation (bind mounts don't exist in the
-# build container). Pruned to what the generator + its imports need — keep in
-# sync with scripts/gen_repl_stubs.py's imports (tool_repl the shim → replkit,
+# build container). Sources come from the deb's installed tree via compose's
+# named context (framework-src=/usr/share/daharness) — the deb ships no
+# encoders/ and the ruff.toml builtins side-block is a checkout-only lane
+# (generator warns and continues). Keep the COPY list in sync with
+# scripts/gen_repl_stubs.py's imports (tool_repl the shim → replkit,
 # daharness, utils, auxiliaries, payloads, listeners, constants, requirements
 # deps already above).
-COPY daharness/ /home/jovyan/framework-build/daharness/
-COPY utils/ /home/jovyan/framework-build/utils/
-COPY auxiliaries/ /home/jovyan/framework-build/auxiliaries/
-COPY payloads/ /home/jovyan/framework-build/payloads/
-COPY listeners/ /home/jovyan/framework-build/listeners/
-COPY encoders/ /home/jovyan/framework-build/encoders/
-COPY replkit/ /home/jovyan/framework-build/replkit/
-COPY constants.py tool_repl.py scripts/gen_repl_stubs.py /home/jovyan/framework-build/tmp-copy/
+COPY --from=framework-src daharness/ /home/jovyan/framework-build/daharness/
+COPY --from=framework-src utils/ /home/jovyan/framework-build/utils/
+COPY --from=framework-src auxiliaries/ /home/jovyan/framework-build/auxiliaries/
+COPY --from=framework-src payloads/ /home/jovyan/framework-build/payloads/
+COPY --from=framework-src listeners/ /home/jovyan/framework-build/listeners/
+COPY --from=framework-src replkit/ /home/jovyan/framework-build/replkit/
+COPY --from=framework-src constants.py tool_repl.py scripts/gen_repl_stubs.py /home/jovyan/framework-build/tmp-copy/
 RUN mv /home/jovyan/framework-build/tmp-copy/gen_repl_stubs.py /home/jovyan/framework-build/scripts_gen_repl_stubs.py \
     && mkdir -p /home/jovyan/framework-build/scripts \
     && mv /home/jovyan/framework-build/scripts_gen_repl_stubs.py /home/jovyan/framework-build/scripts/gen_repl_stubs.py \

@@ -1,0 +1,10 @@
+# Minimal lane hygiene (2026-10-21 trim): keep secrets and huge local
+# directories out of every build context sent to the daemon — the tree this
+# lane builds FROM is deliberately tiny, the mounts do the heavy lifting.
+.git
+**/.env
+*.db
+scratch.*
+dockered/jupyter-nbi/mcp.json
+venv
+run/
