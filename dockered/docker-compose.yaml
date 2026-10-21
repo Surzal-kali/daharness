@@ -1,134 +1,21 @@
 # =============================================================================
-# Framework workbench: ChromaDB + Open WebUI + JupyterLab (tool nursery)
+# Framework workbench: Open WebUI + JupyterLab + code-server
 #
-# NETWORK POSTURE (2026-09-17, user decision "C"): the iptables lockdown is
-# GONE — no NET_ADMIN caps, no cage, on any service. Rationale: the framework
-# is the scope-lined gateway to the outside world (check_scope / .scope files /
-# RoE headers enforce program scope in-process), and the only consumer the
-# cage ever actually restricted was the secretary chat loop. The cage also
-# collided with the workbench topology: the gateway+brain used to run INSIDE
-# the (now-removed) open-terminal container, so LOCKDOWN_NETWORK caged the framework's own
-# target lanes (inspect_host, amass, ZAP, nmap vs real hosts) along with the
-# shell. Scope discipline is now purely the in-process layer + operator RoE.
+# Trimmed 2026-10-21 to these three services — the old chroma + postgres
+# entries (and dockered/README.md) went with the retired harness repo; the
+# framework itself ships as the daharness .deb (/usr/share/daharness, systemd
+# services) and the bind mounts get re-pointed there if a rebuild is needed.
 #
-# The framework gateway + Brain sidecar no longer run inside this stack (the
-# old open-terminal service was removed) — run them on the host via
-# bootstrap.py / bootstrap.py --daemon; see dockered/README.md.
-#
-# JupyterLab (the tool nursery) bind-mounts the live framework tree and the
-# dabooks work dir; its daharness kernel drives the same tool lane as the
-# Brain sidecar and tool_repl, reaching the Brain through the shared
-# run/brain.sock inside the bind-mounted tree. JUPYTER_TOKEN-gated and
-# bound to the host's JupyterLab port on all interfaces (operator choice,
-# reaches the lab lanes).
-#
-# Open WebUI is the open chat frontend: it does its own web search and calls
-# the framework's API routes for tool/code execution.
-#
-# ChromaDB is defined below as the `chroma` service — it mirrors the previous
-# standalone `chroma` container (same image, same config.yaml, same `chroma-data`
-# bind mount, host port 9000).  jupyter and open-webui reach it by DNS name
-# `chroma` on the workbench network.  See the note above the service block
-# about removing the standalone container first.
-#
-# Usage:
-#   cd dockered
-#   docker rm -f chroma      # clear the standalone container if present
-#   docker compose up -d --build        # full service map: dockered/README.md
-#
-# ChromaDB:    http://localhost:9000      (vector registry, reused volume)
-# Open WebUI:  http://localhost:3000      (chat front end)
+# Open WebUI:  http://localhost:3000      (chat front end; LLM = host Ollama)
 # JupyterLab:  http://localhost:8888      (tool nursery, JUPYTER_TOKEN)
 # code-server: https://localhost:8443     (browser editor, CODE_SERVER_PASSWORD)
-# Framework gateway + Brain: run on the HOST lane (bootstrap.py; gateway :5000)
 #
-# Both jupyter and (previously) open-terminal bind-mount the live production
-# tree instead of baking a COPY, so code edits on the host are picked up with
-# no rebuild. Note: .dockerignore does NOT apply to bind mounts — .git/ and
-# any non-ignored host files become visible inside the containers.
+#   cd dockered
+#   docker compose build && docker compose up -d
 #
-# Override API keys / tokens via shell env or a dockered/.env file:
-#   OPEN_TERMINAL_API_KEY=your-key
-#   GATEWAY_API_KEY=your-key
-#   JUPYTER_TOKEN=your-token
+# Tokens live in dockered/.env (gitignored; see .git/info/exclude too).
 # =============================================================================
-
 services:
-  # ─────────────────────────────────────────────────────────────────────────
-  # ChromaDB — mirrored from the existing standalone `chroma` container so the
-  # workbench is self-contained.  Service name `chroma` is the DNS name on the
-  # workbench network, matching CHROMA_HOST=chroma in framework.env.
-  #
-  # Before `docker compose up`, stop/remove the standalone container to avoid a
-  # host port-9000 / container-name collision:
-  #   docker rm -f chroma
-  # ─────────────────────────────────────────────────────────────────────────
-  chroma:
-    image: chromadb/chroma
-    command: [ "run", "/config.yaml" ]
-    ports:
-      - "9000:8000" # host 9000 -> container 8000 (matches existing mapping)
-    networks:
-      workbench:
-        ipv4_address: 172.28.0.10
-    volumes:
-      - ../chroma-data:/data # reuse the existing on-disk vector store
-      - ./chroma-config.yaml:/config.yaml:ro
-    restart: unless-stopped
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Postgres — the engagement hive-mind DB (2026-10-19 design). One database,
-  # schema-per-store: engagement (cobweb key + registry), journal (append-only
-  # per-dispatch spine), evidence (the promoted unknown ledger). Init scripts
-  # in ./postgres/init run in name order on FIRST boot of this volume: roles
-  # (001_roles.sh) → schemas+grants (002_schemas.sql) → purge/sweep functions
-  # (003_functions.sql).
-  #
-  # Roles are the audit story: lanes INSERT/SELECT (evidence also UPDATE), no
-  # lane ever holds DELETE — the retention sweep runs as an owner-executed
-  # SECURITY DEFINER function, and only harness_operator may run
-  # engagement.purge() (same authority model as the scope gate: the secretary
-  # can never erase the record of what it did).
-  #
-  # Published on loopback only — a server holding live creds during an
-  # engagement must not listen on the LAN. Container lanes (jupyter, future
-  # lanes) reach it over the workbench network by DNS name `postgres`.
-  # Passwords: set these in dockered/.env (gitignored) before first volume
-  # boot — the init scripts bake them once; changing them afterwards means
-  # `docker compose down -v` or manual ALTER ROLE.
-  # ─────────────────────────────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    networks:
-      workbench:
-        ipv4_address: 172.28.0.20
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-harness_admin}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in dockered/.env}
-      - POSTGRES_DB=${POSTGRES_DB:-harness}
-      - HARNESS_DB_OPERATOR_PASSWORD=${HARNESS_DB_OPERATOR_PASSWORD:-harness_operator_change_me}
-      - HARNESS_DB_BRAIN_PASSWORD=${HARNESS_DB_BRAIN_PASSWORD:-harness_brain_change_me}
-      - HARNESS_DB_GATEWAY_PASSWORD=${HARNESS_DB_GATEWAY_PASSWORD:-harness_gateway_change_me}
-      - HARNESS_DB_REPL_PASSWORD=${HARNESS_DB_REPL_PASSWORD:-harness_repl_change_me}
-    # 2GB cap: idle Postgres is a few hundred MB; shared_buffers at this VM's
-    # scale stays small. The triage (2026-10-19, full avg10=0.00) says there
-    # is room, but a cap keeps a runaway analytics query from repeating the
-    # open-webui OOM story on the host lane.
-    mem_limit: 2g
-    memswap_limit: 2g
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-harness_admin} -d ${POSTGRES_DB:-harness}"]
-      interval: 30s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
-    restart: unless-stopped
-
   # ─────────────────────────────────────────────────────────────────────────
   # Open WebUI — chat front end layered over the framework.
   # Talks to Ollama directly at 10.10.10.128:11434 (LLM, host lane enp92s0 —
@@ -359,7 +246,6 @@ services:
 volumes:
   open-webui-data:
   code-server-config:
-  pgdata:
 
 
 networks:
