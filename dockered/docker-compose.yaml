@@ -92,6 +92,15 @@ services:
       additional_contexts:
         framework-src: /usr/share/daharness
       dockerfile: dockered/jupyter.Dockerfile
+      # Build in the host network namespace. BuildKit's default isolated
+      # namespace was intermittently unable to resolve public names
+      # (2026-10-21: "Temporary failure resolving 'archive.ubuntu.com'"
+      # mid-build, while host DNS via dnsmasq + 75.75.75.75 was fine).
+      # host network lets the build container hit the host's resolv.conf
+      # directly — same path `docker run` uses successfully. Build-only;
+      # the runtime container still gets the workbench bridge + dns:
+      # 172.28.0.1 pin below.
+      network: host
     ports:
       - "8888:8888" # published on all host interfaces (operator choice — reaches the lab lanes)
     networks:
@@ -167,6 +176,16 @@ services:
       # state root — see the PATH-identical mounts above + header start order.
       - BRAIN_SOCKET=/run/daharness/brain.sock
       - WORKSPACE_ROOT=/var/lib/daharness
+      # Host-native daharness-pg cluster (deb wrapper, :5433 — NOT a compose
+      # service). Containers reach it through the workbench-bridge gateway
+      # 172.28.0.1; pinning HARNESS_DB_HOST makes both the engagement lane
+      # (utils.engagement._host_candidates) and framework_doctor's postgres
+      # probe resolve the cluster deterministically instead of relying on
+      # the built-in 127.0.0.1-then-172.28.0.1 fallback order (the loopback
+      # first-try fails instantly against the host-native cluster from
+      # inside a container, costing one timeout per connect).
+      - HARNESS_DB_HOST=172.28.0.1
+      - HARNESS_DB_PORT=5433
     command:
       - start-notebook.py
       - --ServerApp.ip=0.0.0.0
@@ -271,6 +290,11 @@ services:
       # enforces daemon-first start ordering (see compose header + jupyter).
       - BRAIN_SOCKET=/run/daharness/brain.sock
       - WORKSPACE_ROOT=/var/lib/daharness
+      # Host-native daharness-pg cluster — same pin as jupyter (see there
+      # for the why). The editor terminal runs framework_doctor + the
+      # engagement lane; both need the deterministic gateway pin.
+      - HARNESS_DB_HOST=172.28.0.1
+      - HARNESS_DB_PORT=5433
     volumes:
       - code-server-config:/config # extensions, settings, history
       - /home/kali/github/systempackage/daharness:/config/workspace # the live build tree (dadeb checkout, kali-owned → editor writes land here; deb tree rides PATH-identical at /usr/share/daharness below)

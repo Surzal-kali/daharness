@@ -9,7 +9,13 @@
 FROM quay.io/jupyter/base-notebook:latest
 
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+# nodejs/npm: jupyterlab-lsp's pyright language server runs under node.
+# git: needed by stub-gen (gen_repl_stubs.py imports the framework tree which
+# uses git for version discovery) and by the notebook lane at runtime. Merged
+# into a single apt-get update to avoid a second network round-trip — the
+# previous duplicate RUN here was the step that surfaced the BuildKit DNS
+# flakiness (2026-10-21), since it was the only non-cached apt step left.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm git \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt /tmp/framework-requirements.txt
 
@@ -140,9 +146,6 @@ RUN mkdir -p /opt/conda/share/framework-stubs /opt/conda/share/jupyter/pyrightco
   "reportAttributeAccessIssue": "none"
 }
 EOF
-
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm git\
-    && rm -rf /var/lib/apt/lists/*
 
 # Belt-and-braces: anything a root step created inside jovyan's home (now or
 # in a future layer) would shadow/break the server at runtime — .config was
