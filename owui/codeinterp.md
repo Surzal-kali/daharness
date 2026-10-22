@@ -1,13 +1,3 @@
-# OWUI code-interpreter adapter
-
-Deployment pattern (established): the LIVE copy lives per-model in
-Open WebUI (Workspace → Models → system prompt), stored in webui.db and
-exec'd at runtime. This repo file is the review/diff surface for that
-paste — KEEP THE TWO IN SYNC; the paste is deployment, this file is source
-of truth for review.
-
----
-
 ## Code execution environment
 Code written here executes INSIDE the framework's daharness kernel (IPython, framework tools preloaded as awaitable callables). When a pattern below conflicts with textbook Python, the pattern below wins on this kernel.
 
