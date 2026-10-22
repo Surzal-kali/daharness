@@ -11,6 +11,14 @@
 # create_host_path=false so up fails loudly instead of docker silently
 # mkdir-ing an empty dir that the daemon's tmpfs would then overmount.
 #
+# The shipped daharness unit now sets RuntimeDirectoryPreserve=restart
+# (2026-10-22): `systemctl restart` — and Restart=on-failure restarts —
+# keep the tmpfs mounted, so the /run binds below survive daemon restarts.
+# A full `systemctl stop && start` cycle still recreates the tmpfs; the
+# lanes' binds then pin the dead generation (empty /run/daharness inside,
+# brain.sock ENOENT — observed 2026-10-21). Fix: docker compose up -d
+# --force-recreate jupyter code-server after any full stop.
+#
 # Open WebUI:  http://localhost:3000      (chat front end; LLM = host Ollama)
 # JupyterLab:  http://localhost:8888      (tool nursery, JUPYTER_TOKEN)
 # code-server: https://localhost:8443     (browser editor, CODE_SERVER_PASSWORD)
@@ -201,10 +209,15 @@ services:
   # + chat (config provisioned on first boot only, then operator-owned —
   # never overwritten by later boots).
   #
-  # The live framework tree is mounted (same discipline as jupyter) so
-  # run/brain.sock is reachable from the editor's terminal lane and code
-  # edits on the host need no rebuild. It mounts at /config/workspace — the
-  # lsio image's default workspace path, which its boot-time chown prunes.
+  # Workspace (2026-10-21): the live BUILD tree — the dadeb checkout at
+  # /home/kali/github/systempackage/daharness, where the .deb is built from —
+  # mounted at /config/workspace, the lsio image's default workspace path
+  # (bind mount, so the image's own boot-time workspace provisioning never
+  # touches it). Not the deb's installed tree anymore; /usr/share/daharness
+  # stays mounted PATH-identical below solely for the compose named-context
+  # lane. The checkout is kali-owned, so with PUID=1000 editor writes land
+  # in the tree, and run/brain.sock stays reachable via the PATH-identical
+  # /run + /var/lib state mounts (same discipline as jupyter).
   #
   # Auth: PASSWORD comes from CODE_SERVER_PASSWORD in dockered/.env
   # (gitignored). Compose fails up when unset — the editor shell has full
@@ -244,7 +257,7 @@ services:
       - PGID=1000
       - PASSWORD=${CODE_SERVER_PASSWORD:?set CODE_SERVER_PASSWORD in dockered/.env}
       - OLLAMA_BASE_URL=http://192.168.56.1:11434 # read by the init script when provisioning Continue
-      - DEFAULT_WORKSPACE=/config/workspace # editor boots opened on the framework tree
+      - DEFAULT_WORKSPACE=/config/workspace # editor boots opened on the workspace (the live build tree)
       # Docker lane: the CLI (docker.io + docker-compose-v2, baked in
       # code-server.Dockerfile) talks to the HOST daemon via the shared
       # socket. DOCKER_HOME pins the CLI config dir to the live tree so
@@ -260,8 +273,8 @@ services:
       - WORKSPACE_ROOT=/var/lib/daharness
     volumes:
       - code-server-config:/config # extensions, settings, history
-      - /usr/share/daharness:/config/workspace # the deb's tree (root:root → operator writes fail honestly; edit the lane repo via the PATH-identical mount below)
-      # Docker lane (with group_add below): second mount of the work tree,
+      - /home/kali/github/systempackage/daharness:/config/workspace # the live build tree (dadeb checkout, kali-owned → editor writes land here; deb tree rides PATH-identical at /usr/share/daharness below)
+      # Docker lane (with group_add below): the compose-lane repo (dockered/),
       # PATH-IDENTICAL to the host — when compose runs INSIDE this container
       # (-f on the shared tree), ./-relative bind sources must resolve on the
       # HOST daemon. /config/workspace exists only in-container; pointing
@@ -290,6 +303,7 @@ services:
           create_host_path: false
       - ./code-server-init/00-extensions-and-continue.sh:/custom-cont-init.d/00-extensions-and-continue.sh:ro
       - ./code-server-init/05-docker-socket-access.sh:/custom-cont-init.d/05-docker-socket-access.sh:ro
+      - ./code-server-init/06-daharness-group-access.sh:/custom-cont-init.d/06-daharness-group-access.sh:ro
       - ./code-server-init/10-framework-runtime.sh:/custom-cont-init.d/10-framework-runtime.sh:ro
     group_add:
       - "967" # HOST socket GID from `stat -c %g /var/run/docker.sock` — re-sync if the daemon group ever changes. Covers root/exec lanes only: lsio's s6 user-drop discards these GIDs for the abc process, which 05-docker-socket-access.sh repairs via /etc/group membership.
